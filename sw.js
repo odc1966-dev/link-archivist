@@ -1,5 +1,5 @@
 /* 링크보관함 서비스워커 — 오프라인에서도 앱이 열리도록 셸을 캐시한다 */
-const CACHE = 'linkarchive-v2';
+const CACHE = 'linkarchive-v3';
 const SHELL = ['./', './index.html', './manifest.json', './icon-192.png', './icon-512.png'];
 
 self.addEventListener('install', e => {

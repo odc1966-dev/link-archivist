@@ -232,7 +232,10 @@ nav button.on{color:var(--primary)}
 
 <header>
   <h1>🔗 링크<span>보관함</span></h1>
-  <button class="icon-btn" onclick="openSettings()" title="설정">⚙️</button>
+  <div>
+    <button class="icon-btn" id="cloud-btn" onclick="syncNow(true)" title="지금 동기화" style="display:none">☁️</button>
+    <button class="icon-btn" onclick="openSettings()" title="설정">⚙️</button>
+  </div>
 </header>
 
 <main>
@@ -297,6 +300,12 @@ nav button.on{color:var(--primary)}
     </div>
     <button class="btn btn-outline" onclick="testApi()">🔌 연결 테스트</button>
     <button class="btn btn-primary" onclick="saveSettings()">저장</button>
+    <p class="section-title" style="margin-top:24px">기기 간 동기화 (GitHub)</p>
+    <div class="field">
+      <label>GitHub 토큰 — <a href="https://github.com/settings/tokens/new?scopes=gist&description=%EB%A7%81%ED%81%AC%EB%B3%B4%EA%B4%80%ED%95%A8%20%EB%8F%99%EA%B8%B0%ED%99%94" target="_blank" style="color:var(--primary)">여기서 발급</a> (gist 권한만 체크, 폰·PC에 같은 토큰 입력)</label>
+      <input id="set-ghtoken" type="password" placeholder="ghp_ 로 시작하는 토큰 붙여넣기" autocomplete="off">
+    </div>
+    <button class="btn btn-outline" onclick="testSyncToken()">☁️ 동기화 연결 테스트</button>
     <p class="section-title" style="margin-top:24px">데이터 관리</p>
     <button class="btn btn-outline" onclick="exportData()">⬇️ 백업 파일 내보내기 (JSON)</button>
     <button class="btn btn-outline" onclick="document.getElementById('import-file').click()">⬆️ 백업 파일 가져오기</button>
@@ -330,14 +339,15 @@ nav button.on{color:var(--primary)}
 /* ============================================================
    상태 및 저장소
    ============================================================ */
-const LS = { items:'linkarchive-items', folders:'linkarchive-folders', settings:'linkarchive-settings' };
+const LS = { items:'linkarchive-items', folders:'linkarchive-folders', settings:'linkarchive-settings', tombs:'linkarchive-tombs' };
 
 const DEFAULT_FOLDERS = ['작업치료','이스포츠 기획','영양제 정보','생활/주방용품','일반 참고자료'];
 const DEFAULT_MODELS = { gemini:'gemini-2.5-flash', claude:'claude-haiku-4-5-20251001', openai:'gpt-4o-mini' };
 
-let items    = load(LS.items, []);          // 저장된 링크 [{id,url,title,folder,memo,type,createdAt}]
+let items    = load(LS.items, []);          // 저장된 링크 [{id,url,title,folder,memo,file,fileKind,createdAt,updatedAt}]
 let folders  = load(LS.folders, DEFAULT_FOLDERS.slice());
 let settings = load(LS.settings, { provider:'gemini', apiKey:'', model:'' });
+let tombs    = load(LS.tombs, { items:[], folders:[] }); // 삭제 기록 — 동기화 시 다른 기기에도 삭제를 전파
 let pending  = [];                          // 검토 대기 중인 링크
 let currentFilter = '전체';
 
@@ -346,7 +356,10 @@ function load(key, fallback){
   catch(e){ return fallback; }
 }
 function save(key, val){ localStorage.setItem(key, JSON.stringify(val)); }
-function persistAll(){ save(LS.items, items); save(LS.folders, folders); }
+function persistAll(){
+  save(LS.items, items); save(LS.folders, folders); save(LS.tombs, tombs);
+  scheduleSync(); // 변경이 있으면 잠시 후 자동 동기화
+}
 
 /* ============================================================
    화면 전환 / 공통 UI
@@ -729,7 +742,7 @@ function saveAll(){
   const now = new Date().toISOString();
   for(const p of pending){
     items.unshift({ id:p.id, url:p.url, title:p.title || domainOf(p.url), folder:p.folder, memo:p.memo,
-                    file:p.file || '', fileKind:p.fileKind || '', createdAt: now });
+                    file:p.file || '', fileKind:p.fileKind || '', createdAt: now, updatedAt: now });
   }
   // 파일 링크는 저장하면서 자동 다운로드 (설정에서 끌 수 있음)
   const files = pending.filter(p=>p.file);
@@ -817,10 +830,13 @@ function applyItemEdit(id){
   const it = items.find(x=>x.id===id); if(!it) return;
   it.title = document.getElementById('edit-title').value.trim() || it.title;
   it.folder = document.getElementById('edit-folder').value;
+  it.updatedAt = new Date().toISOString(); // 동기화 병합 시 최신 수정본이 이기도록
   persistAll(); closeModal('item-modal'); renderArchive();
   toast('수정했어요');
 }
 function deleteItem(id){
+  const it = items.find(x=>x.id===id);
+  if(it) tombs.items.push({ url: it.url, at: new Date().toISOString() }); // 다른 기기에도 삭제 전파
   items = items.filter(x=>x.id!==id);
   persistAll(); closeModal('item-modal'); renderArchive();
   toast('삭제했어요');
@@ -848,7 +864,9 @@ function addFolder(){
   const name = input.value.trim();
   if(!name){ toast('폴더 이름을 입력하세요'); return; }
   if(folders.includes(name)){ toast('이미 있는 폴더예요'); return; }
-  folders.push(name); persistAll();
+  folders.push(name);
+  tombs.folders = tombs.folders.filter(t=>t.name!==name); // 다시 만든 폴더는 삭제 기록 취소
+  persistAll();
   input.value = '';
   renderFolderManager(); renderArchive();
   toast(`'${name}' 폴더를 만들었어요`);
@@ -860,8 +878,11 @@ function renameFolder(i){
   const newName = name.trim();
   if(folders.includes(newName)){ toast('이미 있는 폴더예요'); return; }
   folders[i] = newName;
-  items.forEach(it=>{ if(it.folder===oldName) it.folder=newName; });
+  const ts = new Date().toISOString();
+  items.forEach(it=>{ if(it.folder===oldName){ it.folder=newName; it.updatedAt=ts; } });
   pending.forEach(p=>{ if(p.folder===oldName) p.folder=newName; });
+  tombs.folders.push({ name: oldName, at: ts });               // 옛 이름은 다른 기기에서 제거
+  tombs.folders = tombs.folders.filter(t=>t.name!==newName);    // 새 이름은 삭제 기록 취소
   if(currentFilter===oldName) currentFilter=newName;
   persistAll(); renderFolderManager(); renderArchive();
 }
@@ -872,9 +893,11 @@ function deleteFolder(i){
     ? `'${name}' 폴더를 삭제할까요?\n안에 있던 링크 ${count}개는 '일반 참고자료'로 이동합니다.`
     : `'${name}' 폴더를 삭제할까요?`)) return;
   folders.splice(i,1);
+  const ts = new Date().toISOString();
+  tombs.folders.push({ name, at: ts }); // 다른 기기에서도 이 폴더 제거
   if(count>0){
-    if(!folders.includes('일반 참고자료')) folders.push('일반 참고자료');
-    items.forEach(it=>{ if(it.folder===name) it.folder='일반 참고자료'; });
+    if(!folders.includes('일반 참고자료')){ folders.push('일반 참고자료'); tombs.folders = tombs.folders.filter(t=>t.name!=='일반 참고자료'); }
+    items.forEach(it=>{ if(it.folder===name){ it.folder='일반 참고자료'; it.updatedAt=ts; } });
   }
   if(currentFilter===name) currentFilter='전체';
   persistAll(); renderFolderManager(); renderArchive();
@@ -889,6 +912,7 @@ function openSettings(){
   document.getElementById('set-key').value = settings.apiKey;
   document.getElementById('set-model').value = settings.model;
   document.getElementById('set-autodl').checked = settings.autoDownload !== false; // 기본 켜짐
+  document.getElementById('set-ghtoken').value = settings.ghToken || '';
   onProviderChange();
   document.getElementById('settings-modal').classList.add('on');
 }
@@ -897,15 +921,20 @@ function onProviderChange(){
   document.getElementById('set-model').placeholder = '기본값: ' + DEFAULT_MODELS[p];
 }
 function saveSettings(){
+  const newToken = document.getElementById('set-ghtoken').value.trim();
   settings = {
     provider: document.getElementById('set-provider').value,
     apiKey: document.getElementById('set-key').value.trim(),
     model: document.getElementById('set-model').value.trim(),
-    autoDownload: document.getElementById('set-autodl').checked
+    autoDownload: document.getElementById('set-autodl').checked,
+    ghToken: newToken,
+    gistId: newToken === (settings.ghToken || '') ? (settings.gistId || '') : '' // 토큰이 바뀌면 저장소 다시 찾기
   };
   save(LS.settings, settings);
   closeModal('settings-modal');
-  toast(settings.apiKey ? 'AI 분류 설정 완료!' : '저장됨 (키 없음 → 키워드 분류)');
+  setCloudIcon('☁️');
+  if(settings.ghToken){ toast('설정 저장! 동기화를 시작해요'); syncNow(false); }
+  else toast(settings.apiKey ? 'AI 분류 설정 완료!' : '저장됨 (키 없음 → 키워드 분류)');
 }
 async function testApi(){
   // 저장 전 입력값으로 바로 테스트
@@ -957,9 +986,162 @@ function importData(e){
 }
 
 /* ============================================================
+   기기 간 동기화 (GitHub Gist)
+   - 사용자의 GitHub 계정에 비공개 Gist 하나를 만들어 데이터 저장소로 쓴다
+   - 폰·PC에 같은 토큰을 넣으면: 앱 열 때 자동 병합 + 변경 후 자동 업로드
+   - 병합 규칙: 링크는 URL 기준으로 최신 수정본이 이김,
+     삭제는 삭제 기록(tombs)이 항목보다 최신일 때만 반영
+   ============================================================ */
+const GIST_FILE = 'link-archivist-data.json';
+let syncing = false, syncTimer = null;
+
+async function ghApi(path, opts = {}){
+  const res = await fetch('https://api.github.com' + path, {
+    ...opts,
+    cache: 'no-store', // 브라우저가 응답을 60초 캐시해서 방금 만든 Gist가 안 보이는 문제 방지
+    headers: {
+      'Authorization': 'Bearer ' + settings.ghToken,
+      'Accept': 'application/vnd.github+json',
+      ...(opts.body ? { 'Content-Type': 'application/json' } : {})
+    }
+  });
+  if(!res.ok) throw new Error('GitHub ' + res.status + (res.status===401 ? ' (토큰 확인 필요)' : ''));
+  if(res.status === 204) return null; // DELETE 성공 등 본문 없는 응답
+  return res.json();
+}
+// 다른 기기가 이미 만든 동기화 Gist 찾기.
+// GitHub 목록 반영이 몇 초 늦을 수 있어 중복 생성될 가능성이 있는데,
+// 중복을 발견하면 데이터를 전부 병합하고 최신 것 하나만 남긴다(자가 치유).
+async function findGistMerging(){
+  const list = await ghApi('/gists?per_page=100');
+  const cands = (list || []).filter(g => g.files && g.files[GIST_FILE])
+    .sort((a,b) => (b.updated_at||'').localeCompare(a.updated_at||''));
+  if(cands.length === 0) return { id:null, data:null };
+  let data = null;
+  for(const g of cands){
+    const d = await readGistData(g.id);
+    data = data ? mergeSets(d, data) : d;
+  }
+  for(const g of cands.slice(1)){
+    try{ await ghApi('/gists/' + g.id, { method:'DELETE' }); }catch(e){}
+  }
+  return { id: cands[0].id, data };
+}
+async function readGistData(id){
+  const g = await ghApi('/gists/' + id);
+  const f = g.files[GIST_FILE];
+  if(!f) return null;
+  const content = f.truncated ? await (await fetch(f.raw_url, { cache:'no-store' })).text() : f.content;
+  try{ return JSON.parse(content); }catch(e){ return null; }
+}
+
+function newerOf(a, b){
+  return ((a.updatedAt || a.createdAt || '') >= (b.updatedAt || b.createdAt || '')) ? a : b;
+}
+// 두 데이터 묶음 병합 (b쪽 폴더 순서 우선 — 로컬을 b로 넘긴다)
+function mergeSets(a, b){
+  const A = a || {}, B = b || {};
+  const at = A.tombs || { items:[], folders:[] }, bt = B.tombs || { items:[], folders:[] };
+  // 삭제 기록 병합 (URL/폴더명별 최신 것만 유지)
+  const tItem = new Map();
+  [...(at.items||[]), ...(bt.items||[])].forEach(t => { const p = tItem.get(t.url); if(!p || t.at > p.at) tItem.set(t.url, t); });
+  const tFold = new Map();
+  [...(at.folders||[]), ...(bt.folders||[])].forEach(t => { const p = tFold.get(t.name); if(!p || t.at > p.at) tFold.set(t.name, t); });
+  // 링크 병합: URL별로 더 최근에 수정된 쪽이 이김
+  const byUrl = new Map();
+  [...(A.items||[]), ...(B.items||[])].forEach(it => { const p = byUrl.get(it.url); byUrl.set(it.url, p ? newerOf(it, p) : it); });
+  // 삭제 기록이 항목 수정 시각보다 최신이면 항목 제거
+  for(const [url, t] of tItem){
+    const it = byUrl.get(url);
+    if(it && (it.updatedAt || it.createdAt || '') <= t.at) byUrl.delete(url);
+  }
+  // 폴더 병합: b 순서 우선 + a에만 있는 폴더 뒤에 추가, 삭제된 폴더 제외
+  const fold = [...(B.folders||[])];
+  (A.folders||[]).forEach(f => { if(!fold.includes(f)) fold.push(f); });
+  const foldFinal = fold.filter(f => !tFold.has(f));
+  return {
+    items: [...byUrl.values()].sort((a2,b2) => (b2.createdAt||'').localeCompare(a2.createdAt||'')),
+    folders: foldFinal.length ? foldFinal : DEFAULT_FOLDERS.slice(),
+    tombs: { items:[...tItem.values()].slice(-500), folders:[...tFold.values()].slice(-100) }
+  };
+}
+// 원격 데이터와 현재 로컬 데이터 병합
+function mergeData(remote){ return mergeSets(remote, { items, folders, tombs }); }
+
+async function syncNow(manual){
+  if(!settings.ghToken || syncing) return;
+  syncing = true; setCloudIcon('⏳');
+  try{
+    let gistId = settings.gistId;
+    let remote = null;
+    if(gistId){
+      // 저장된 Gist가 삭제됐으면(중복 정리 등) 다시 찾는다
+      try{ remote = await readGistData(gistId); }
+      catch(e){ if(String(e.message).includes('404')) gistId = ''; else throw e; }
+    }
+    if(!gistId){
+      const found = await findGistMerging();
+      gistId = found.id; remote = found.data;
+    }
+    const merged = mergeData(remote);
+    items = merged.items; folders = merged.folders; tombs = merged.tombs;
+    // 로컬 저장 (persistAll을 쓰면 동기화가 또 예약되므로 직접 저장)
+    save(LS.items, items); save(LS.folders, folders); save(LS.tombs, tombs);
+    // 병합 결과 업로드
+    const payload = JSON.stringify({ items, folders, tombs, updatedAt: new Date().toISOString() });
+    if(gistId){
+      await ghApi('/gists/' + gistId, { method:'PATCH', body: JSON.stringify({ files: { [GIST_FILE]: { content: payload } } }) });
+    }else{
+      const g = await ghApi('/gists', { method:'POST', body: JSON.stringify({
+        description: '링크보관함 동기화 데이터 (자동 생성)', public: false,
+        files: { [GIST_FILE]: { content: payload } }
+      })});
+      gistId = g.id;
+    }
+    if(settings.gistId !== gistId){ settings.gistId = gistId; save(LS.settings, settings); }
+    // 화면 갱신
+    if(document.getElementById('view-archive').classList.contains('active')) renderArchive();
+    setCloudIcon('☁️');
+    if(manual) toast('☁️ 동기화 완료!');
+  }catch(err){
+    console.error(err);
+    setCloudIcon('⚠️');
+    if(manual) toast('동기화 실패: ' + err.message.slice(0, 60));
+  }finally{
+    syncing = false;
+  }
+}
+// 변경 후 3초 뒤에 한 번만 업로드 (연속 수정을 묶어서 처리)
+function scheduleSync(){
+  if(!settings.ghToken) return;
+  clearTimeout(syncTimer);
+  syncTimer = setTimeout(()=>syncNow(false), 3000);
+}
+function setCloudIcon(ch){
+  const b = document.getElementById('cloud-btn');
+  b.style.display = settings.ghToken ? '' : 'none';
+  b.textContent = ch;
+}
+// 설정 화면의 연결 테스트 (입력 중인 토큰으로 검사)
+async function testSyncToken(){
+  const token = document.getElementById('set-ghtoken').value.trim();
+  if(!token){ toast('GitHub 토큰을 먼저 입력하세요'); return; }
+  toast('연결 확인 중…');
+  try{
+    const res = await fetch('https://api.github.com/gists?per_page=1', {
+      headers:{ 'Authorization':'Bearer ' + token, 'Accept':'application/vnd.github+json' }
+    });
+    if(!res.ok) throw new Error(res.status === 401 ? '토큰이 올바르지 않아요' : 'GitHub ' + res.status);
+    toast('✅ 연결 성공! 저장을 누르면 동기화가 켜져요');
+  }catch(err){ toast('❌ ' + err.message); }
+}
+
+/* ============================================================
    초기화 + PWA 서비스워커 등록
    ============================================================ */
 updateBadge();
+setCloudIcon('☁️');
+if(settings.ghToken) syncNow(false); // 앱을 열면 다른 기기의 변경 사항을 가져온다
 if('serviceWorker' in navigator && location.protocol.startsWith('http')){
   navigator.serviceWorker.register('sw.js').catch(()=>{});
 }
