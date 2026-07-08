@@ -1,0 +1,968 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="theme-color" content="#4F46E5">
+<title>링크보관함 — DM 링크 자동 정리</title>
+<link rel="manifest" href="manifest.json">
+<link rel="icon" href="icon-192.png">
+<style>
+/* ============================================================
+   링크보관함 (Link Archivist)
+   인스타그램 DM 텍스트를 붙여넣으면 링크를 추출하고
+   AI(또는 키워드 규칙)로 폴더를 자동 분류해 로컬에 저장하는 앱.
+   - 데이터 저장: localStorage (기기 내부, 서버 없음)
+   - AI 분류: Gemini / Claude / OpenAI API (설정에서 키 입력)
+   ============================================================ */
+:root{
+  --primary:#4F46E5;      /* 인디고 - 메인 색 */
+  --primary-dark:#4338CA;
+  --primary-light:#EEF2FF;
+  --bg:#F4F5FA;
+  --card:#FFFFFF;
+  --text:#1E2235;
+  --text-sub:#6B7280;
+  --border:#E5E7EB;
+  --danger:#EF4444;
+  --success:#10B981;
+  --radius:14px;
+  --shadow:0 1px 3px rgba(30,34,53,.08), 0 4px 14px rgba(30,34,53,.06);
+}
+*{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{height:100%}
+body{
+  font-family:'Segoe UI','Malgun Gothic','Apple SD Gothic Neo',sans-serif;
+  background:var(--bg);color:var(--text);
+  max-width:560px;margin:0 auto;
+  display:flex;flex-direction:column;
+  overscroll-behavior-y:none;
+}
+
+/* ---------- 상단 헤더 ---------- */
+header{
+  display:flex;align-items:center;justify-content:space-between;
+  padding:14px 18px 10px;
+}
+header h1{font-size:1.25rem;font-weight:800;color:var(--primary);letter-spacing:-.02em}
+header h1 span{color:var(--text)}
+.icon-btn{
+  background:none;border:none;font-size:1.35rem;cursor:pointer;
+  padding:6px;border-radius:50%;line-height:1;
+}
+.icon-btn:active{background:var(--primary-light)}
+
+/* ---------- 화면(뷰) 공통 ---------- */
+main{flex:1;overflow-y:auto;padding:4px 16px 90px}
+.view{display:none}
+.view.active{display:block}
+.section-title{font-size:.85rem;font-weight:700;color:var(--text-sub);margin:14px 2px 8px}
+
+/* ---------- 1. 입력 화면 ---------- */
+#dm-input{
+  width:100%;min-height:220px;resize:vertical;
+  border:1.5px solid var(--border);border-radius:var(--radius);
+  padding:14px;font-size:.95rem;line-height:1.5;font-family:inherit;
+  background:var(--card);box-shadow:var(--shadow);
+}
+#dm-input:focus{outline:none;border-color:var(--primary)}
+.btn{
+  display:flex;align-items:center;justify-content:center;gap:8px;
+  width:100%;padding:14px;margin-top:10px;
+  border:none;border-radius:var(--radius);
+  font-size:1rem;font-weight:700;cursor:pointer;font-family:inherit;
+}
+.btn:disabled{opacity:.5;cursor:default}
+.btn-primary{background:var(--primary);color:#fff;box-shadow:var(--shadow)}
+.btn-primary:active{background:var(--primary-dark)}
+.btn-outline{background:var(--card);color:var(--primary);border:1.5px solid var(--primary)}
+.btn-outline:active{background:var(--primary-light)}
+.hint{font-size:.8rem;color:var(--text-sub);margin-top:10px;line-height:1.6;text-align:center}
+
+/* AI 분석 중 로딩 오버레이 */
+#loading{
+  position:fixed;inset:0;z-index:60;display:none;
+  background:rgba(255,255,255,.85);
+  flex-direction:column;align-items:center;justify-content:center;gap:16px;
+}
+#loading.on{display:flex}
+.spinner{
+  width:44px;height:44px;border-radius:50%;
+  border:4px solid var(--primary-light);border-top-color:var(--primary);
+  animation:spin .8s linear infinite;
+}
+@keyframes spin{to{transform:rotate(360deg)}}
+#loading p{font-weight:700;color:var(--primary)}
+
+/* ---------- 2. 검토 화면 ---------- */
+.card-wrap{position:relative;margin-bottom:12px;border-radius:var(--radius);overflow:hidden}
+.card-del-bg{  /* 스와이프 시 뒤에 보이는 빨간 삭제 배경 */
+  position:absolute;inset:0;background:var(--danger);border-radius:var(--radius);
+  display:flex;align-items:center;justify-content:flex-end;
+  color:#fff;font-weight:700;padding-right:22px;font-size:.95rem;
+}
+.card{
+  position:relative;background:var(--card);border-radius:var(--radius);
+  box-shadow:var(--shadow);padding:14px;
+  transition:transform .18s ease;touch-action:pan-y;
+}
+.card-top{display:flex;align-items:flex-start;gap:8px}
+.type-badge{
+  flex-shrink:0;font-size:.7rem;font-weight:700;padding:3px 8px;border-radius:20px;
+  color:#fff;margin-top:2px;
+}
+.card-title{
+  flex:1;border:none;background:none;font-size:.98rem;font-weight:700;
+  font-family:inherit;color:var(--text);width:100%;padding:2px 0;
+}
+.card-title:focus{outline:none;border-bottom:1.5px dashed var(--primary)}
+.card-x{
+  flex-shrink:0;background:none;border:none;color:var(--text-sub);
+  font-size:1.05rem;cursor:pointer;padding:2px 4px;
+}
+.card-url{
+  font-size:.78rem;color:var(--primary);margin-top:6px;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;display:block;
+}
+.card-memo{font-size:.82rem;color:var(--text-sub);margin-top:6px;line-height:1.45}
+.chip-row{display:flex;gap:6px;overflow-x:auto;margin-top:10px;padding-bottom:2px;scrollbar-width:none}
+.chip-row::-webkit-scrollbar{display:none}
+.chip{
+  flex-shrink:0;font-size:.78rem;font-weight:600;padding:6px 12px;
+  border-radius:20px;border:1.5px solid var(--border);
+  background:var(--card);color:var(--text-sub);cursor:pointer;font-family:inherit;
+}
+.chip.on{background:var(--primary);border-color:var(--primary);color:#fff}
+.empty{
+  text-align:center;color:var(--text-sub);padding:60px 20px;line-height:1.8;font-size:.92rem;
+}
+.empty .big{font-size:2.4rem;display:block;margin-bottom:8px}
+
+/* ---------- 3. 보관함 화면 ---------- */
+#search{
+  width:100%;padding:12px 16px;border:1.5px solid var(--border);
+  border-radius:var(--radius);font-size:.95rem;font-family:inherit;
+  background:var(--card);box-shadow:var(--shadow);
+}
+#search:focus{outline:none;border-color:var(--primary)}
+#folder-filter{display:flex;gap:6px;overflow-x:auto;margin:12px 0;padding-bottom:2px;scrollbar-width:none}
+#folder-filter::-webkit-scrollbar{display:none}
+.archive-card{
+  background:var(--card);border-radius:var(--radius);box-shadow:var(--shadow);
+  padding:14px;margin-bottom:10px;cursor:pointer;
+}
+.archive-head{display:flex;align-items:flex-start;gap:8px}
+.archive-title{flex:1;font-size:.96rem;font-weight:700;line-height:1.4;word-break:break-all}
+.archive-menu-btn{background:none;border:none;font-size:1.1rem;color:var(--text-sub);cursor:pointer;padding:0 4px}
+.archive-meta{display:flex;align-items:center;gap:8px;margin-top:8px;flex-wrap:wrap}
+.folder-tag{font-size:.72rem;font-weight:700;color:var(--primary);background:var(--primary-light);padding:3px 9px;border-radius:20px}
+.archive-date{font-size:.72rem;color:var(--text-sub)}
+.archive-domain{font-size:.72rem;color:var(--text-sub)}
+
+/* ---------- 모달(설정/폴더관리/항목메뉴) ---------- */
+.modal-bg{
+  position:fixed;inset:0;z-index:50;display:none;
+  background:rgba(30,34,53,.45);align-items:flex-end;justify-content:center;
+}
+.modal-bg.on{display:flex}
+.modal{
+  background:var(--card);border-radius:20px 20px 0 0;width:100%;max-width:560px;
+  max-height:86vh;overflow-y:auto;padding:20px 18px 30px;
+  animation:up .22s ease;
+}
+@keyframes up{from{transform:translateY(40px);opacity:.5}to{transform:none;opacity:1}}
+.modal h2{font-size:1.05rem;margin-bottom:16px;display:flex;justify-content:space-between;align-items:center}
+.modal h2 button{background:none;border:none;font-size:1.2rem;cursor:pointer;color:var(--text-sub)}
+.field{margin-bottom:14px}
+.field label{display:block;font-size:.8rem;font-weight:700;color:var(--text-sub);margin-bottom:6px}
+.field input,.field select{
+  width:100%;padding:11px 12px;border:1.5px solid var(--border);border-radius:10px;
+  font-size:.92rem;font-family:inherit;background:var(--card);color:var(--text);
+}
+.field input:focus,.field select:focus{outline:none;border-color:var(--primary)}
+.folder-row{display:flex;align-items:center;gap:8px;padding:9px 0;border-bottom:1px solid var(--border)}
+.folder-row span{flex:1;font-size:.92rem;font-weight:600}
+.folder-row small{color:var(--text-sub);font-size:.75rem}
+.mini-btn{
+  background:var(--primary-light);border:none;border-radius:8px;padding:6px 10px;
+  font-size:.78rem;font-weight:700;color:var(--primary);cursor:pointer;font-family:inherit;
+}
+.mini-btn.red{background:#FEE2E2;color:var(--danger)}
+.menu-item{
+  display:block;width:100%;text-align:left;background:none;border:none;
+  padding:14px 6px;font-size:.98rem;font-weight:600;font-family:inherit;
+  border-bottom:1px solid var(--border);cursor:pointer;color:var(--text);
+}
+.menu-item.red{color:var(--danger)}
+
+/* ---------- 하단 탭 ---------- */
+nav{
+  position:fixed;bottom:0;left:50%;transform:translateX(-50%);
+  width:100%;max-width:560px;z-index:40;
+  display:flex;background:var(--card);
+  border-top:1px solid var(--border);
+  padding-bottom:env(safe-area-inset-bottom);
+}
+nav button{
+  flex:1;background:none;border:none;padding:9px 0 8px;cursor:pointer;
+  font-family:inherit;font-size:.72rem;font-weight:700;color:var(--text-sub);
+  display:flex;flex-direction:column;align-items:center;gap:2px;position:relative;
+}
+nav button .ni{font-size:1.3rem}
+nav button.on{color:var(--primary)}
+.badge{
+  position:absolute;top:4px;right:calc(50% - 24px);
+  background:var(--danger);color:#fff;font-size:.62rem;font-weight:800;
+  min-width:16px;height:16px;border-radius:9px;
+  display:flex;align-items:center;justify-content:center;padding:0 4px;
+}
+
+/* ---------- 토스트 ---------- */
+#toast{
+  position:fixed;bottom:80px;left:50%;transform:translateX(-50%) translateY(20px);
+  background:var(--text);color:#fff;font-size:.85rem;font-weight:600;
+  padding:11px 20px;border-radius:24px;opacity:0;pointer-events:none;
+  transition:all .25s ease;z-index:70;white-space:nowrap;max-width:90vw;
+  overflow:hidden;text-overflow:ellipsis;
+}
+#toast.on{opacity:1;transform:translateX(-50%) translateY(0)}
+</style>
+</head>
+<body>
+
+<header>
+  <h1>🔗 링크<span>보관함</span></h1>
+  <button class="icon-btn" onclick="openSettings()" title="설정">⚙️</button>
+</header>
+
+<main>
+  <!-- ========== 1. 입력 화면 ========== -->
+  <section id="view-input" class="view active">
+    <p class="section-title">인스타그램 DM 텍스트를 붙여넣으세요</p>
+    <textarea id="dm-input" placeholder="DM 대화 전체를 복사해서 여기에 붙여넣기 하세요.&#10;노션 링크, 구글 드라이브, 웹사이트 주소를 자동으로 찾아냅니다."></textarea>
+    <button class="btn btn-outline" onclick="pasteClipboard()">📋 클립보드에서 붙여넣기</button>
+    <button class="btn btn-primary" id="btn-extract" onclick="startExtract()">🔍 링크 추출 및 분류 시작</button>
+    <p class="hint" id="input-hint">API 키를 설정하면 AI가 문맥을 읽고 제목·폴더를 자동으로 정해줍니다.<br>키가 없어도 키워드 규칙으로 기본 분류됩니다.</p>
+  </section>
+
+  <!-- ========== 2. 검토 화면 ========== -->
+  <section id="view-review" class="view">
+    <p class="section-title">저장 전에 제목과 폴더를 확인하세요 <span style="font-weight:400">(제목 터치 = 수정, 카드 왼쪽 스와이프 = 삭제)</span></p>
+    <div id="review-list"></div>
+    <button class="btn btn-primary" id="btn-save" onclick="saveAll()">💾 전체 저장</button>
+  </section>
+
+  <!-- ========== 3. 보관함 화면 ========== -->
+  <section id="view-archive" class="view">
+    <input id="search" type="search" placeholder="🔍 제목·메모·주소 검색" oninput="renderArchive()">
+    <div id="folder-filter"></div>
+    <div id="archive-list"></div>
+    <button class="btn btn-outline" onclick="openFolderManager()">🗂️ 폴더 관리</button>
+  </section>
+</main>
+
+<!-- ========== 하단 탭 ========== -->
+<nav>
+  <button id="tab-input" class="on" onclick="showView('input')"><span class="ni">✏️</span>입력</button>
+  <button id="tab-review" onclick="showView('review')"><span class="ni">🔎</span>검토<span class="badge" id="review-badge" style="display:none">0</span></button>
+  <button id="tab-archive" onclick="showView('archive')"><span class="ni">📚</span>보관함</button>
+</nav>
+
+<!-- ========== 로딩 오버레이 ========== -->
+<div id="loading"><div class="spinner"></div><p id="loading-text">AI가 링크를 분석하고 있어요…</p></div>
+
+<!-- ========== 설정 모달 ========== -->
+<div class="modal-bg" id="settings-modal">
+  <div class="modal">
+    <h2>⚙️ 설정 <button onclick="closeModal('settings-modal')">✕</button></h2>
+    <div class="field">
+      <label>AI 서비스</label>
+      <select id="set-provider" onchange="onProviderChange()">
+        <option value="gemini">Google Gemini (무료 할당량 있음)</option>
+        <option value="claude">Anthropic Claude</option>
+        <option value="openai">OpenAI</option>
+      </select>
+    </div>
+    <div class="field">
+      <label>API 키</label>
+      <input id="set-key" type="password" placeholder="API 키를 입력하세요" autocomplete="off">
+    </div>
+    <div class="field">
+      <label>모델 이름 (비우면 기본값 사용)</label>
+      <input id="set-model" type="text" autocomplete="off">
+    </div>
+    <div class="field" style="display:flex;align-items:center;gap:10px;margin-top:4px">
+      <input id="set-autodl" type="checkbox" style="width:20px;height:20px;flex-shrink:0">
+      <label for="set-autodl" style="margin:0;font-size:.88rem;color:var(--text)">파일 링크는 저장할 때 자동 다운로드 (드라이브·PDF 등)</label>
+    </div>
+    <button class="btn btn-outline" onclick="testApi()">🔌 연결 테스트</button>
+    <button class="btn btn-primary" onclick="saveSettings()">저장</button>
+    <p class="section-title" style="margin-top:24px">데이터 관리</p>
+    <button class="btn btn-outline" onclick="exportData()">⬇️ 백업 파일 내보내기 (JSON)</button>
+    <button class="btn btn-outline" onclick="document.getElementById('import-file').click()">⬆️ 백업 파일 가져오기</button>
+    <input type="file" id="import-file" accept=".json" style="display:none" onchange="importData(event)">
+  </div>
+</div>
+
+<!-- ========== 폴더 관리 모달 ========== -->
+<div class="modal-bg" id="folder-modal">
+  <div class="modal">
+    <h2>🗂️ 폴더 관리 <button onclick="closeModal('folder-modal')">✕</button></h2>
+    <div id="folder-manage-list"></div>
+    <div class="field" style="margin-top:16px">
+      <label>새 폴더 추가</label>
+      <div style="display:flex;gap:8px">
+        <input id="new-folder-name" type="text" placeholder="폴더 이름" style="flex:1">
+        <button class="mini-btn" style="padding:0 16px" onclick="addFolder()">추가</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ========== 보관 항목 메뉴 모달 ========== -->
+<div class="modal-bg" id="item-modal">
+  <div class="modal" id="item-modal-body"></div>
+</div>
+
+<div id="toast"></div>
+
+<script>
+/* ============================================================
+   상태 및 저장소
+   ============================================================ */
+const LS = { items:'linkarchive-items', folders:'linkarchive-folders', settings:'linkarchive-settings' };
+
+const DEFAULT_FOLDERS = ['작업치료','이스포츠 기획','영양제 정보','생활/주방용품','일반 참고자료'];
+const DEFAULT_MODELS = { gemini:'gemini-2.5-flash', claude:'claude-haiku-4-5-20251001', openai:'gpt-4o-mini' };
+
+let items    = load(LS.items, []);          // 저장된 링크 [{id,url,title,folder,memo,type,createdAt}]
+let folders  = load(LS.folders, DEFAULT_FOLDERS.slice());
+let settings = load(LS.settings, { provider:'gemini', apiKey:'', model:'' });
+let pending  = [];                          // 검토 대기 중인 링크
+let currentFilter = '전체';
+
+function load(key, fallback){
+  try{ const v = localStorage.getItem(key); return v ? JSON.parse(v) : fallback; }
+  catch(e){ return fallback; }
+}
+function save(key, val){ localStorage.setItem(key, JSON.stringify(val)); }
+function persistAll(){ save(LS.items, items); save(LS.folders, folders); }
+
+/* ============================================================
+   화면 전환 / 공통 UI
+   ============================================================ */
+function showView(name){
+  document.querySelectorAll('.view').forEach(v=>v.classList.remove('active'));
+  document.querySelectorAll('nav button').forEach(b=>b.classList.remove('on'));
+  document.getElementById('view-'+name).classList.add('active');
+  document.getElementById('tab-'+name).classList.add('on');
+  if(name==='review') renderReview();
+  if(name==='archive') renderArchive();
+}
+function toast(msg){
+  const t = document.getElementById('toast');
+  t.textContent = msg; t.classList.add('on');
+  clearTimeout(t._timer);
+  t._timer = setTimeout(()=>t.classList.remove('on'), 2200);
+}
+function closeModal(id){ document.getElementById(id).classList.remove('on'); }
+function updateBadge(){
+  const b = document.getElementById('review-badge');
+  b.style.display = pending.length ? 'flex' : 'none';
+  b.textContent = pending.length;
+}
+function esc(s){ return String(s??'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+
+// 모달 바깥(어두운 영역) 터치로 닫기
+document.querySelectorAll('.modal-bg').forEach(m=>{
+  m.addEventListener('click', e=>{ if(e.target===m) m.classList.remove('on'); });
+});
+
+/* ============================================================
+   1. 링크 추출 (정규표현식)
+   ============================================================ */
+function extractLinks(text){
+  const re = /https?:\/\/[^\s<>"'`)\]}]+/g;
+  const matches = [];
+  let m;
+  while((m = re.exec(text))){
+    // URL 끝에 붙은 문장부호 제거
+    const url = m[0].replace(/[.,;:!?…]+$/, '');
+    matches.push({ url, start: m.index, end: m.index + url.length });
+  }
+  const seen = new Set(); const out = [];
+  for(let i = 0; i < matches.length; i++){
+    const cur = matches[i];
+    if(seen.has(cur.url)) continue;
+    seen.add(cur.url);
+    // 문맥은 "이전 링크 끝 ~ 다음 링크 시작" 사이로 제한한다.
+    // (여러 링크가 붙어 있을 때 서로의 설명이 섞여 오분류되는 것을 방지)
+    const prevEnd   = i > 0 ? matches[i-1].end : 0;
+    const nextStart = i < matches.length-1 ? matches[i+1].start : text.length;
+    const before = text.slice(Math.max(prevEnd, cur.start - 250), cur.start);
+    const after  = text.slice(cur.end, Math.min(nextStart, cur.end + 120));
+    const context = (before + ' ' + after).replace(/\s+/g, ' ').trim().slice(0, 300);
+    out.push({ url: cur.url, context, before });
+  }
+  return out;
+}
+
+// 도메인으로 링크 종류 판별 (배지 표시용)
+function linkType(url){
+  let host = '';
+  try{ host = new URL(url).hostname.replace(/^www\./,''); }catch(e){}
+  if(/notion\.(so|site)/.test(host))            return {label:'노션',   color:'#111827'};
+  if(/drive\.google/.test(host))                return {label:'드라이브', color:'#059669'};
+  if(/docs\.google/.test(host))                 return {label:'구글문서', color:'#2563EB'};
+  if(/youtu\.?be/.test(host))                   return {label:'유튜브',  color:'#DC2626'};
+  if(/instagram/.test(host))                    return {label:'인스타',  color:'#C026D3'};
+  if(/open\.kakao/.test(host))                  return {label:'오픈채팅', color:'#CA8A04'};
+  if(/blog\.naver|tistory|brunch/.test(host))   return {label:'블로그',  color:'#16A34A'};
+  return {label:'웹', color:'#6B7280'};
+}
+function domainOf(url){ try{ return new URL(url).hostname.replace(/^www\./,''); }catch(e){ return url; } }
+
+/* ============================================================
+   파일 링크 감지 및 자동 다운로드
+   - 구글 드라이브 공유 링크 → 직접 다운로드 주소로 변환
+   - 구글 문서/시트/슬라이드 → PDF/엑셀 내보내기 주소로 변환
+   - .pdf .hwp .zip 등 확장자로 끝나는 직접 파일 링크 감지
+   브라우저 보안상 파일은 앱 안이 아니라 기기의 '다운로드' 폴더에 저장된다.
+   ============================================================ */
+const FILE_EXTS = ['pdf','zip','hwp','hwpx','doc','docx','xls','xlsx','ppt','pptx','txt','csv','png','jpg','jpeg','gif','mp3','mp4','apk'];
+function fileInfo(url){
+  let u; try{ u = new URL(url); }catch(e){ return null; }
+  const host = u.hostname.replace(/^www\./,'');
+  if(host === 'drive.google.com'){
+    const m = u.pathname.match(/\/file\/d\/([^/]+)/);
+    const id = m ? m[1] : u.searchParams.get('id');
+    if(id) return { direct:`https://drive.google.com/uc?export=download&id=${id}`, kind:'드라이브 파일' };
+  }
+  if(host === 'docs.google.com'){
+    let m = u.pathname.match(/\/document\/d\/([^/]+)/);
+    if(m) return { direct:`https://docs.google.com/document/d/${m[1]}/export?format=pdf`, kind:'구글문서 (PDF로 저장)' };
+    m = u.pathname.match(/\/spreadsheets\/d\/([^/]+)/);
+    if(m) return { direct:`https://docs.google.com/spreadsheets/d/${m[1]}/export?format=xlsx`, kind:'구글시트 (엑셀로 저장)' };
+    m = u.pathname.match(/\/presentation\/d\/([^/]+)/);
+    if(m) return { direct:`https://docs.google.com/presentation/d/${m[1]}/export/pdf`, kind:'슬라이드 (PDF로 저장)' };
+  }
+  const ext = (u.pathname.match(/\.([a-z0-9]{2,5})$/i) || [])[1];
+  if(ext && FILE_EXTS.includes(ext.toLowerCase())) return { direct:url, kind:ext.toUpperCase()+' 파일' };
+  return null;
+}
+
+// 숨은 iframe으로 다운로드 실행 (팝업 차단에 안 걸림)
+// * 드라이브 대용량 파일은 바이러스 검사 안내 때문에 자동으로 안 될 수 있음 → 카드의 ⬇️ 버튼으로 수동 다운로드
+function triggerDownload(directUrl){
+  const f = document.createElement('iframe');
+  f.style.display = 'none';
+  f.src = directUrl;
+  document.body.appendChild(f);
+  setTimeout(()=>f.remove(), 60000); // 다운로드 시작 후 정리
+}
+function downloadItem(id){
+  const it = items.find(x=>x.id===id) || pending.find(x=>x.id===id);
+  if(it && it.file){ triggerDownload(it.file); toast('📥 다운로드 시작! 다운로드 폴더를 확인하세요'); }
+}
+
+/* ============================================================
+   2. 분류 — 키워드 규칙 (API 키 없을 때의 기본 분류)
+   ============================================================ */
+const KEYWORD_RULES = [
+  { folder:'작업치료',    words:['작업치료','감각통합','재활','치료','소아','아동발달','평가','임상','발달','언어치료','인지','시지각','OT','감각'] },
+  { folder:'이스포츠 기획', words:['이스포츠','e스포츠','게임','대회','리그','토너먼트','스크림','롤','발로란트'] },
+  { folder:'영양제 정보',  words:['영양제','비타민','오메가','유산균','프로바이오틱스','마그네슘','아연','건강기능식품','섭취'] },
+  { folder:'생활/주방용품', words:['주방','살림','수납','정리','청소','생활용품','공구','템','추천템','꿀템','가전'] },
+];
+function classifyByKeyword(text){
+  // 규칙마다 일치하는 키워드 수를 세서 가장 점수가 높은 폴더를 고른다
+  let best = null, bestScore = 0;
+  for(const rule of KEYWORD_RULES){
+    if(!folders.includes(rule.folder)) continue; // 사용자가 지운 폴더는 제외
+    const score = rule.words.reduce((n, w) => n + (text.includes(w) ? 1 : 0), 0);
+    if(score > bestScore){ bestScore = score; best = rule.folder; }
+  }
+  if(best) return best;
+  return folders.includes('일반 참고자료') ? '일반 참고자료' : (folders[0] || '일반 참고자료');
+}
+// 문맥에서 제목 후보 만들기 (AI가 없거나 실패했을 때)
+// DM은 보통 "설명 문장 + 링크" 순서이므로, 링크 바로 앞의 마지막 문장을 제목으로 쓴다
+function fallbackTitle(link){
+  let hint = (link.before || '');
+  // 마지막 줄 → 마지막 문장 순으로 좁혀가기 (이모지도 문장 구분자로 취급)
+  const lines = hint.split('\n').map(s => s.trim()).filter(Boolean);
+  if(lines.length) hint = lines[lines.length - 1];
+  const sents = hint.split(/[.!?~…]+|[\u{1F000}-\u{1FAFF}\u{2600}-\u{27BF}\u{2B00}-\u{2BFF}]/gu)
+    .map(s => s.trim()).filter(s => s.length >= 4);
+  if(sents.length) hint = sents[sents.length - 1];
+  hint = hint.replace(/\s+/g, ' ').trim();
+  if(hint.length >= 4) return hint.slice(0, 40);
+  const ctx = link.context.replace(/\s+/g, ' ').trim();
+  return ctx.length >= 4 ? ctx.slice(0, 40) : domainOf(link.url);
+}
+
+/* ============================================================
+   3. 분류 — LLM API 호출 (Gemini / Claude / OpenAI)
+   API 키는 설정 화면에서 입력하며 localStorage에만 저장된다.
+   ============================================================ */
+function buildPrompt(links){
+  const list = links.map((l,i)=>`${i+1}. URL: ${l.url}\n   주변 문맥: ${l.context || '(없음)'}`).join('\n');
+  return `당신은 링크 정리 도우미입니다. 아래는 인스타그램 DM에서 추출한 링크와 그 주변 문맥입니다.
+
+각 링크에 대해 다음을 정해주세요.
+1) title: 문맥을 참고한 한국어 제목 (40자 이내, 무엇에 대한 자료인지 알 수 있게)
+2) folder: 반드시 다음 폴더 중 하나 → ${folders.join(', ')}
+3) memo: 한 줄 요약 메모 (30자 이내, 없으면 빈 문자열)
+
+링크 목록:
+${list}
+
+다른 설명 없이 아래 형식의 JSON 배열로만 답하세요:
+[{"url":"...","title":"...","folder":"...","memo":"..."}]`;
+}
+
+async function callLLM(prompt){
+  const provider = settings.provider;
+  const model = settings.model || DEFAULT_MODELS[provider];
+  const key = settings.apiKey;
+
+  if(provider === 'gemini'){
+    const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
+      method:'POST',
+      headers:{ 'Content-Type':'application/json', 'x-goog-api-key': key },
+      body: JSON.stringify({ contents:[{ parts:[{ text: prompt }] }] })
+    });
+    if(!res.ok) throw new Error(`Gemini 오류 ${res.status}: ${(await res.text()).slice(0,200)}`);
+    const data = await res.json();
+    return data.candidates?.[0]?.content?.parts?.[0]?.text || '';
+  }
+  if(provider === 'claude'){
+    const res = await fetch('https://api.anthropic.com/v1/messages', {
+      method:'POST',
+      headers:{
+        'Content-Type':'application/json',
+        'x-api-key': key,
+        'anthropic-version':'2023-06-01',
+        'anthropic-dangerous-direct-browser-access':'true'  // 브라우저에서 직접 호출 허용
+      },
+      body: JSON.stringify({ model, max_tokens: 4000, messages:[{ role:'user', content: prompt }] })
+    });
+    if(!res.ok) throw new Error(`Claude 오류 ${res.status}: ${(await res.text()).slice(0,200)}`);
+    const data = await res.json();
+    return data.content?.[0]?.text || '';
+  }
+  // openai
+  const res = await fetch('https://api.openai.com/v1/chat/completions', {
+    method:'POST',
+    headers:{ 'Content-Type':'application/json', 'Authorization':'Bearer '+key },
+    body: JSON.stringify({ model, messages:[{ role:'user', content: prompt }] })
+  });
+  if(!res.ok) throw new Error(`OpenAI 오류 ${res.status}: ${(await res.text()).slice(0,200)}`);
+  const data = await res.json();
+  return data.choices?.[0]?.message?.content || '';
+}
+
+// LLM 응답에서 JSON 배열만 안전하게 꺼내기 (```json 코드펜스 등 제거)
+function parseJsonArray(text){
+  const start = text.indexOf('['), end = text.lastIndexOf(']');
+  if(start === -1 || end === -1 || end <= start) throw new Error('JSON 배열을 찾지 못함');
+  return JSON.parse(text.slice(start, end + 1));
+}
+
+/* ============================================================
+   추출 → 분류 실행 (메인 버튼)
+   ============================================================ */
+async function startExtract(){
+  const text = document.getElementById('dm-input').value.trim();
+  if(!text){ toast('먼저 DM 텍스트를 붙여넣어 주세요'); return; }
+
+  let links = extractLinks(text);
+  if(links.length === 0){ toast('텍스트에서 링크를 찾지 못했어요'); return; }
+
+  // 이미 보관함에 있거나 검토 대기 중인 링크는 건너뛰기 (같은 DM 중복 붙여넣기 방지)
+  const known = new Set([...items.map(it=>it.url), ...pending.map(p=>p.url)]);
+  const dupCount = links.filter(l=>known.has(l.url)).length;
+  links = links.filter(l=>!known.has(l.url));
+  if(links.length === 0){ toast(`링크 ${dupCount}개 모두 이미 저장되어 있어요`); return; }
+
+  // 1차: 키워드 규칙으로 기본값 채우기 (AI 실패 시에도 결과가 나오도록)
+  const now = Date.now();
+  const newPending = links.map((l,i)=>{
+    const fi = fileInfo(l.url); // 파일 링크면 직접 다운로드 주소 기억
+    return {
+      id: now + i,
+      url: l.url,
+      context: l.context,
+      title: fallbackTitle(l),
+      // DM은 "설명 → 링크" 순서라서, 링크 앞 텍스트가 충분하면 그것만으로 분류
+      // (링크 뒤 텍스트는 대개 다음 링크의 설명이라 섞이면 오분류됨)
+      folder: classifyByKeyword(l.before && l.before.trim().length >= 8 ? l.before : l.context),
+      memo: '',
+      file: fi ? fi.direct : '',
+      fileKind: fi ? fi.kind : ''
+    };
+  });
+
+  // 2차: API 키가 있으면 AI로 제목/폴더/메모 업그레이드
+  if(settings.apiKey){
+    const loading = document.getElementById('loading');
+    document.getElementById('loading-text').textContent = `AI가 링크 ${links.length}개를 분석하고 있어요…`;
+    loading.classList.add('on');
+    try{
+      const raw = await callLLM(buildPrompt(links));
+      const parsed = parseJsonArray(raw);
+      for(const p of newPending){
+        const hit = parsed.find(x => x.url === p.url) || parsed[newPending.indexOf(p)];
+        if(!hit) continue;
+        if(hit.title)  p.title = String(hit.title).slice(0, 60);
+        if(hit.memo)   p.memo  = String(hit.memo).slice(0, 60);
+        if(hit.folder && folders.includes(hit.folder)) p.folder = hit.folder;
+      }
+      toast(`AI 분류 완료! 링크 ${links.length}개` + (dupCount ? ` (중복 ${dupCount}개 제외)` : ''));
+    }catch(err){
+      console.error(err);
+      toast('AI 분석 실패 — 키워드 규칙으로 분류했어요');
+    }finally{
+      loading.classList.remove('on');
+    }
+  }else{
+    toast(`링크 ${links.length}개 추출!` + (dupCount ? ` (중복 ${dupCount}개 제외)` : ''));
+  }
+
+  pending = pending.concat(newPending);
+  document.getElementById('dm-input').value = '';
+  updateBadge();
+  showView('review');
+}
+
+// 클립보드에서 붙여넣기 (권한이 막히면 안내)
+async function pasteClipboard(){
+  try{
+    const text = await navigator.clipboard.readText();
+    if(!text){ toast('클립보드가 비어 있어요'); return; }
+    document.getElementById('dm-input').value = text;
+    toast('붙여넣기 완료!');
+  }catch(e){
+    toast('입력창을 길게 눌러 직접 붙여넣어 주세요');
+  }
+}
+
+/* ============================================================
+   2. 검토 화면 렌더링 (+ 스와이프 삭제)
+   ============================================================ */
+function renderReview(){
+  const list = document.getElementById('review-list');
+  const btn = document.getElementById('btn-save');
+  if(pending.length === 0){
+    list.innerHTML = '<div class="empty"><span class="big">🔎</span>검토할 링크가 없어요.<br>입력 탭에서 DM을 붙여넣어 보세요.</div>';
+    btn.style.display = 'none';
+    return;
+  }
+  btn.style.display = 'flex';
+  btn.textContent = `💾 전체 저장 (${pending.length}개)`;
+
+  list.innerHTML = pending.map(p=>{
+    const t = linkType(p.url);
+    const chips = folders.map(f=>
+      `<button class="chip ${f===p.folder?'on':''}" onclick="setPendingFolder(${p.id}, this)" data-folder="${esc(f)}">${esc(f)}</button>`
+    ).join('');
+    return `
+    <div class="card-wrap" data-id="${p.id}">
+      <div class="card-del-bg">🗑️ 삭제</div>
+      <div class="card">
+        <div class="card-top">
+          <span class="type-badge" style="background:${t.color}">${t.label}</span>
+          <input class="card-title" value="${esc(p.title)}" onchange="setPendingTitle(${p.id}, this.value)">
+          <button class="card-x" onclick="removePending(${p.id})" title="삭제">✕</button>
+        </div>
+        <span class="card-url">${esc(p.url)}</span>
+        ${p.fileKind ? `<p class="card-memo">📎 ${esc(p.fileKind)} — 저장하면 자동 다운로드 <button class="mini-btn" onclick="downloadItem(${p.id})">⬇️ 지금 받기</button></p>` : ''}
+        ${p.memo ? `<p class="card-memo">💬 ${esc(p.memo)}</p>` : ''}
+        <div class="chip-row">${chips}</div>
+      </div>
+    </div>`;
+  }).join('');
+
+  // 왼쪽 스와이프로 삭제
+  list.querySelectorAll('.card-wrap').forEach(attachSwipe);
+}
+function setPendingTitle(id, v){ const p = pending.find(x=>x.id===id); if(p) p.title = v.trim(); }
+function setPendingFolder(id, chipEl){
+  const p = pending.find(x=>x.id===id); if(!p) return;
+  p.folder = chipEl.dataset.folder;
+  chipEl.parentElement.querySelectorAll('.chip').forEach(c=>c.classList.remove('on'));
+  chipEl.classList.add('on');
+}
+function removePending(id){
+  pending = pending.filter(x=>x.id!==id);
+  updateBadge(); renderReview();
+}
+
+// 터치 스와이프 삭제 처리
+function attachSwipe(wrap){
+  const card = wrap.querySelector('.card');
+  let startX = 0, dx = 0, dragging = false;
+  card.addEventListener('touchstart', e=>{
+    startX = e.touches[0].clientX; dx = 0; dragging = true;
+    card.style.transition = 'none';
+  }, {passive:true});
+  card.addEventListener('touchmove', e=>{
+    if(!dragging) return;
+    dx = e.touches[0].clientX - startX;
+    if(dx < 0) card.style.transform = `translateX(${dx}px)`; // 왼쪽으로만
+  }, {passive:true});
+  card.addEventListener('touchend', ()=>{
+    dragging = false;
+    card.style.transition = 'transform .18s ease';
+    if(dx < -100){ // 충분히 밀면 삭제
+      card.style.transform = 'translateX(-110%)';
+      setTimeout(()=>removePending(Number(wrap.dataset.id)), 160);
+    }else{
+      card.style.transform = 'none';
+    }
+  });
+}
+
+// 전체 저장 → 보관함으로 이동
+function saveAll(){
+  if(pending.length === 0) return;
+  const now = new Date().toISOString();
+  for(const p of pending){
+    items.unshift({ id:p.id, url:p.url, title:p.title || domainOf(p.url), folder:p.folder, memo:p.memo,
+                    file:p.file || '', fileKind:p.fileKind || '', createdAt: now });
+  }
+  // 파일 링크는 저장하면서 자동 다운로드 (설정에서 끌 수 있음)
+  const files = pending.filter(p=>p.file);
+  const n = pending.length;
+  pending = [];
+  persistAll(); updateBadge();
+  if(files.length && settings.autoDownload !== false){
+    files.forEach((p, i)=> setTimeout(()=>triggerDownload(p.file), i * 800)); // 순차 실행 (동시 다운로드 차단 방지)
+    toast(`${n}개 저장 + 📥 파일 ${files.length}개 다운로드 시작!`);
+  }else{
+    toast(`${n}개 링크를 보관함에 저장했어요`);
+  }
+  showView('archive');
+}
+
+/* ============================================================
+   3. 보관함 렌더링 / 검색 / 필터
+   ============================================================ */
+function renderArchive(){
+  // 폴더 필터 칩 (전체 + 각 폴더, 개수 표시)
+  const filterEl = document.getElementById('folder-filter');
+  const counts = {};
+  items.forEach(it=>counts[it.folder]=(counts[it.folder]||0)+1);
+  if(!folders.includes(currentFilter) && currentFilter!=='전체') currentFilter='전체';
+  filterEl.innerHTML =
+    `<button class="chip ${currentFilter==='전체'?'on':''}" onclick="setFilter('전체')">전체 ${items.length}</button>` +
+    folders.map(f=>`<button class="chip ${currentFilter===f?'on':''}" onclick="setFilter('${esc(f)}')">${esc(f)} ${counts[f]||0}</button>`).join('');
+
+  // 검색 + 필터 적용
+  const q = document.getElementById('search').value.trim().toLowerCase();
+  let shown = items.filter(it => currentFilter==='전체' || it.folder===currentFilter);
+  if(q) shown = shown.filter(it =>
+    (it.title||'').toLowerCase().includes(q) ||
+    (it.memo||'').toLowerCase().includes(q) ||
+    it.url.toLowerCase().includes(q));
+
+  const listEl = document.getElementById('archive-list');
+  if(shown.length === 0){
+    listEl.innerHTML = `<div class="empty"><span class="big">📚</span>${items.length===0?'아직 저장된 링크가 없어요.':'조건에 맞는 링크가 없어요.'}</div>`;
+    return;
+  }
+  listEl.innerHTML = shown.map(it=>{
+    const t = linkType(it.url);
+    const date = it.createdAt ? it.createdAt.slice(0,10) : '';
+    return `
+    <div class="archive-card" onclick="openLink(${it.id})">
+      <div class="archive-head">
+        <span class="type-badge" style="background:${t.color}">${t.label}</span>
+        <span class="archive-title">${esc(it.title)}</span>
+        ${it.file ? `<button class="archive-menu-btn" title="파일 다운로드" onclick="event.stopPropagation();downloadItem(${it.id})">⬇️</button>` : ''}
+        <button class="archive-menu-btn" onclick="event.stopPropagation();openItemMenu(${it.id})">⋮</button>
+      </div>
+      ${it.memo ? `<p class="card-memo">💬 ${esc(it.memo)}</p>` : ''}
+      <div class="archive-meta">
+        <span class="folder-tag">${esc(it.folder)}</span>
+        ${it.fileKind ? `<span class="archive-domain">📎 ${esc(it.fileKind)}</span>` : ''}
+        <span class="archive-domain">${esc(domainOf(it.url))}</span>
+        <span class="archive-date">${date}</span>
+      </div>
+    </div>`;
+  }).join('');
+}
+function setFilter(f){ currentFilter = f; renderArchive(); }
+function openLink(id){
+  const it = items.find(x=>x.id===id);
+  if(it) window.open(it.url, '_blank'); // 노션/드라이브 링크는 해당 앱이 설치되어 있으면 그 앱으로 열림
+}
+
+// 항목별 메뉴 (⋮): 폴더 이동 / 제목 수정 / 삭제
+function openItemMenu(id){
+  const it = items.find(x=>x.id===id); if(!it) return;
+  const body = document.getElementById('item-modal-body');
+  body.innerHTML = `
+    <h2 style="word-break:break-all">${esc(it.title)} <button onclick="closeModal('item-modal')">✕</button></h2>
+    <div class="field"><label>제목 수정</label>
+      <input id="edit-title" type="text" value="${esc(it.title)}"></div>
+    <div class="field"><label>폴더 이동</label>
+      <select id="edit-folder">${folders.map(f=>`<option ${f===it.folder?'selected':''}>${esc(f)}</option>`).join('')}</select></div>
+    <button class="btn btn-primary" onclick="applyItemEdit(${id})">적용</button>
+    ${it.file ? `<button class="btn btn-outline" onclick="downloadItem(${id})">📥 파일 다시 다운로드</button>` : ''}
+    <button class="menu-item red" style="border:none;text-align:center;margin-top:6px" onclick="deleteItem(${id})">🗑️ 이 링크 삭제</button>`;
+  document.getElementById('item-modal').classList.add('on');
+}
+function applyItemEdit(id){
+  const it = items.find(x=>x.id===id); if(!it) return;
+  it.title = document.getElementById('edit-title').value.trim() || it.title;
+  it.folder = document.getElementById('edit-folder').value;
+  persistAll(); closeModal('item-modal'); renderArchive();
+  toast('수정했어요');
+}
+function deleteItem(id){
+  items = items.filter(x=>x.id!==id);
+  persistAll(); closeModal('item-modal'); renderArchive();
+  toast('삭제했어요');
+}
+
+/* ============================================================
+   폴더 관리 (추가 / 이름변경 / 삭제)
+   ============================================================ */
+function openFolderManager(){
+  renderFolderManager();
+  document.getElementById('folder-modal').classList.add('on');
+}
+function renderFolderManager(){
+  const counts = {};
+  items.forEach(it=>counts[it.folder]=(counts[it.folder]||0)+1);
+  document.getElementById('folder-manage-list').innerHTML = folders.map((f,i)=>`
+    <div class="folder-row">
+      <span>${esc(f)} <small>(${counts[f]||0}개)</small></span>
+      <button class="mini-btn" onclick="renameFolder(${i})">이름변경</button>
+      <button class="mini-btn red" onclick="deleteFolder(${i})">삭제</button>
+    </div>`).join('');
+}
+function addFolder(){
+  const input = document.getElementById('new-folder-name');
+  const name = input.value.trim();
+  if(!name){ toast('폴더 이름을 입력하세요'); return; }
+  if(folders.includes(name)){ toast('이미 있는 폴더예요'); return; }
+  folders.push(name); persistAll();
+  input.value = '';
+  renderFolderManager(); renderArchive();
+  toast(`'${name}' 폴더를 만들었어요`);
+}
+function renameFolder(i){
+  const oldName = folders[i];
+  const name = prompt('새 폴더 이름', oldName);
+  if(!name || name.trim()===oldName) return;
+  const newName = name.trim();
+  if(folders.includes(newName)){ toast('이미 있는 폴더예요'); return; }
+  folders[i] = newName;
+  items.forEach(it=>{ if(it.folder===oldName) it.folder=newName; });
+  pending.forEach(p=>{ if(p.folder===oldName) p.folder=newName; });
+  if(currentFilter===oldName) currentFilter=newName;
+  persistAll(); renderFolderManager(); renderArchive();
+}
+function deleteFolder(i){
+  const name = folders[i];
+  const count = items.filter(it=>it.folder===name).length;
+  if(!confirm(count>0
+    ? `'${name}' 폴더를 삭제할까요?\n안에 있던 링크 ${count}개는 '일반 참고자료'로 이동합니다.`
+    : `'${name}' 폴더를 삭제할까요?`)) return;
+  folders.splice(i,1);
+  if(count>0){
+    if(!folders.includes('일반 참고자료')) folders.push('일반 참고자료');
+    items.forEach(it=>{ if(it.folder===name) it.folder='일반 참고자료'; });
+  }
+  if(currentFilter===name) currentFilter='전체';
+  persistAll(); renderFolderManager(); renderArchive();
+  toast('폴더를 삭제했어요');
+}
+
+/* ============================================================
+   설정 (API 키 / 백업)
+   ============================================================ */
+function openSettings(){
+  document.getElementById('set-provider').value = settings.provider;
+  document.getElementById('set-key').value = settings.apiKey;
+  document.getElementById('set-model').value = settings.model;
+  document.getElementById('set-autodl').checked = settings.autoDownload !== false; // 기본 켜짐
+  onProviderChange();
+  document.getElementById('settings-modal').classList.add('on');
+}
+function onProviderChange(){
+  const p = document.getElementById('set-provider').value;
+  document.getElementById('set-model').placeholder = '기본값: ' + DEFAULT_MODELS[p];
+}
+function saveSettings(){
+  settings = {
+    provider: document.getElementById('set-provider').value,
+    apiKey: document.getElementById('set-key').value.trim(),
+    model: document.getElementById('set-model').value.trim(),
+    autoDownload: document.getElementById('set-autodl').checked
+  };
+  save(LS.settings, settings);
+  closeModal('settings-modal');
+  toast(settings.apiKey ? 'AI 분류 설정 완료!' : '저장됨 (키 없음 → 키워드 분류)');
+}
+async function testApi(){
+  // 저장 전 입력값으로 바로 테스트
+  const prev = settings;
+  settings = {
+    provider: document.getElementById('set-provider').value,
+    apiKey: document.getElementById('set-key').value.trim(),
+    model: document.getElementById('set-model').value.trim()
+  };
+  if(!settings.apiKey){ toast('API 키를 먼저 입력하세요'); settings = prev; return; }
+  toast('연결 확인 중…');
+  try{
+    const reply = await callLLM('"OK"라고만 답하세요.');
+    toast(reply ? '✅ 연결 성공!' : '응답이 비어 있어요');
+  }catch(err){
+    toast('❌ 실패: ' + err.message.slice(0, 80));
+  }finally{
+    settings = prev; // 실제 저장은 저장 버튼으로
+  }
+}
+
+// 백업 내보내기 / 가져오기
+function exportData(){
+  const blob = new Blob([JSON.stringify({ items, folders }, null, 2)], { type:'application/json' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `링크보관함-백업-${new Date().toISOString().slice(0,10)}.json`;
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
+function importData(e){
+  const file = e.target.files[0]; if(!file) return;
+  const reader = new FileReader();
+  reader.onload = ()=>{
+    try{
+      const data = JSON.parse(reader.result);
+      if(!Array.isArray(data.items)) throw new Error('형식 오류');
+      // 기존 데이터와 병합 (URL 중복은 건너뜀)
+      const existing = new Set(items.map(it=>it.url));
+      let added = 0;
+      for(const it of data.items){ if(!existing.has(it.url)){ items.push(it); added++; } }
+      for(const f of (data.folders||[])){ if(!folders.includes(f)) folders.push(f); }
+      persistAll(); renderArchive();
+      toast(`가져오기 완료 (새 링크 ${added}개)`);
+    }catch(err){ toast('백업 파일을 읽지 못했어요'); }
+  };
+  reader.readAsText(file);
+  e.target.value = '';
+}
+
+/* ============================================================
+   초기화 + PWA 서비스워커 등록
+   ============================================================ */
+updateBadge();
+if('serviceWorker' in navigator && location.protocol.startsWith('http')){
+  navigator.serviceWorker.register('sw.js').catch(()=>{});
+}
+</script>
+</body>
+</html>
