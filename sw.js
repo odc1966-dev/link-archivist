@@ -1,5 +1,5 @@
 /* 링크보관함 서비스워커 — 오프라인에서도 앱이 열리도록 셸을 캐시한다 */
-const CACHE = 'linkarchive-v6';
+const CACHE = 'linkarchive-v7';
 const SHELL = ['./', './index.html', './manifest.json', './icon-192.png', './icon-512.png'];
 
 self.addEventListener('install', e => {
@@ -12,6 +12,11 @@ self.addEventListener('activate', e => {
       .then(keys => Promise.all(keys.filter(k => k !== CACHE).map(k => caches.delete(k))))
       .then(() => self.clients.claim())
   );
+});
+
+/* 앱이 "지금 실행 중인 서비스워커 버전"을 물어볼 수 있게 한다 (오래된 버전 자동 감지용) */
+self.addEventListener('message', e => {
+  if (e.data === 'version' && e.ports && e.ports[0]) e.ports[0].postMessage({ version: CACHE });
 });
 
 /* 네트워크 우선, 실패하면 캐시 (앱 파일 수정이 바로 반영되도록)
