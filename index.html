@@ -1043,22 +1043,29 @@ function saveSettings(){
   else toast(settings.apiKey ? 'AI 분류 설정 완료!' : '저장됨 (키 없음 → 키워드 분류)');
 }
 async function testApi(){
-  // 저장 전 입력값으로 바로 테스트
+  // 저장 전 입력값으로 바로 테스트.
+  // ★ 기존 설정을 통째로 바꾸면 안 된다 — 테스트 도중 저장이 일어나면
+  //   GitHub 토큰 같은 다른 설정이 날아간다. 반드시 복사본에 덮어쓴다.
   const prev = settings;
-  settings = {
+  const form = {
     provider: document.getElementById('set-provider').value,
     apiKey: document.getElementById('set-key').value.trim(),
     model: document.getElementById('set-model').value.trim()
   };
-  if(!settings.apiKey){ toast('API 키를 먼저 입력하세요'); settings = prev; return; }
+  if(!form.apiKey){ toast('API 키를 먼저 입력하세요'); return; }
+  settings = Object.assign({}, prev, form);
   toast('연결 확인 중…');
   try{
     const reply = await callLLM('"OK"라고만 답하세요.');
     toast(reply ? '✅ 연결 성공!' : '응답이 비어 있어요');
   }catch(err){
-    toast('❌ 실패: ' + err.message.slice(0, 80));
+    toast('❌ ' + String(err.message).slice(0, 90));
   }finally{
-    settings = prev; // 실제 저장은 저장 버튼으로
+    // 모델이 자동으로 대체됐다면 입력칸에 반영해 준다 (저장을 누르면 남는다)
+    const found = settings.model;
+    if(found && !form.model) document.getElementById('set-model').value = found;
+    settings = prev;
+    save(LS.settings, settings); // 테스트 중 덮어써졌을 수 있으니 원래 설정을 되돌려 놓는다
   }
 }
 
@@ -1330,7 +1337,7 @@ function renderSyncStatus(){
    오래된 서비스워커가 남아 있으면 GitHub 통신이 막히는 문제가 있었다.
    그래서 버전을 확인해 다르면 한 번만 자동으로 완전 새로고침한다.
    ============================================================ */
-const SW_EXPECTED = 'linkarchive-v9';
+const SW_EXPECTED = 'linkarchive-v10';
 
 // 실행 중인 서비스워커의 버전을 물어본다
 async function swVersion(){
