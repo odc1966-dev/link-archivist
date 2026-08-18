@@ -320,6 +320,7 @@ nav button.on{color:var(--primary)}
     </div>
     <p id="diag-out" class="hint" style="text-align:left;margin:8px 0 0"></p>
     <p class="section-title" style="margin-top:24px">데이터 관리</p>
+    <p id="storage-status" class="hint" style="text-align:left;margin:0 0 10px"></p>
     <button class="btn btn-outline" onclick="exportData()">⬇️ 백업 파일 내보내기 (JSON)</button>
     <button class="btn btn-outline" onclick="document.getElementById('import-file').click()">⬆️ 백업 파일 가져오기</button>
     <input type="file" id="import-file" accept=".json" style="display:none" onchange="importData(event)">
@@ -1106,6 +1107,7 @@ function openSettings(){
   document.getElementById('app-ver').textContent = SW_EXPECTED.replace('linkarchive-','앱 ');
   renderSyncStatus();
   renderTokenCheck();
+  renderStorageStatus();
   document.getElementById('settings-modal').classList.add('on');
 }
 function onProviderChange(){
@@ -1169,12 +1171,26 @@ async function testApi(){
 
 // 백업 내보내기 / 가져오기
 function exportData(){
-  const blob = new Blob([JSON.stringify({ items, folders }, null, 2)], { type:'application/json' });
+  // 토큰까지 담으면 기기 초기화 후 한 번에 되살릴 수 있다 (대신 파일에 비밀 값이 들어감)
+  const withKeys = confirm(
+    '백업 파일에 GitHub 토큰과 AI 키도 함께 넣을까요?\n\n' +
+    '[확인] 넣기 — 나중에 이 파일 하나로 전부 복구됩니다\n' +
+    '[취소] 링크만 넣기\n\n' +
+    '※ 넣을 경우 파일에 비밀 값이 들어가니 남에게 주지 마세요.');
+  const payload = { items, folders, tombs, savedAt: new Date().toISOString() };
+  if(withKeys){
+    payload.settings = {
+      ghToken: settings.ghToken || '', gistId: settings.gistId || '',
+      provider: settings.provider || 'gemini', model: settings.model || '', apiKey: settings.apiKey || ''
+    };
+  }
+  const blob = new Blob([JSON.stringify(payload, null, 2)], { type:'application/json' });
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
   a.download = `링크보관함-백업-${new Date().toISOString().slice(0,10)}.json`;
   a.click();
   URL.revokeObjectURL(a.href);
+  toast(withKeys ? '백업 저장 (토큰 포함)' : '백업 저장 (링크만)');
 }
 function importData(e){
   const file = e.target.files[0]; if(!file) return;
@@ -1188,12 +1204,47 @@ function importData(e){
       let added = 0;
       for(const it of data.items){ if(!existing.has(it.url)){ items.push(it); added++; } }
       for(const f of (data.folders||[])){ if(!folders.includes(f)) folders.push(f); }
+      // 백업에 토큰이 들어 있으면 복구할지 물어본다
+      let restored = false;
+      if(data.settings && (data.settings.ghToken || data.settings.apiKey)){
+        if(confirm('백업 파일에 토큰/키가 들어 있어요.\n이 기기에도 적용해서 동기화를 바로 켤까요?')){
+          settings = Object.assign({}, settings, data.settings);
+          save(LS.settings, settings);
+          setCloudIcon('☁️');
+          restored = true;
+        }
+      }
       persistAll(); renderArchive();
-      toast(`가져오기 완료 (새 링크 ${added}개)`);
+      toast(`가져오기 완료 (새 링크 ${added}개)` + (restored ? ' · 토큰 복구됨' : ''));
+      if(restored) syncNow(true);
     }catch(err){ toast('백업 파일을 읽지 못했어요'); }
   };
   reader.readAsText(file);
   e.target.value = '';
+}
+/* 브라우저가 데이터를 지우지 않도록 '영구 저장'을 요청한다.
+   시크릿 창이나 '종료 시 데이터 삭제' 설정에서는 허용되지 않는다. */
+let storagePersisted = null;
+async function ensurePersistentStorage(){
+  try{
+    if(!navigator.storage || !navigator.storage.persist) return;
+    storagePersisted = await navigator.storage.persisted();
+    if(!storagePersisted) storagePersisted = await navigator.storage.persist();
+  }catch(e){ storagePersisted = null; }
+}
+function renderStorageStatus(){
+  const el = document.getElementById('storage-status');
+  if(!el) return;
+  if(storagePersisted === true){
+    el.innerHTML = '🟢 이 기기에 데이터가 유지됩니다';
+  }else if(storagePersisted === false){
+    el.innerHTML = '🔴 <b>브라우저가 데이터를 지울 수 있는 상태예요.</b><br>' +
+      '시크릿(비공개) 창이거나, 브라우저에 "종료할 때 인터넷 사용 기록 삭제"가 켜져 있으면 ' +
+      '앱을 닫을 때마다 토큰과 링크가 사라집니다.<br>' +
+      '→ 일반 창에서 열고, 브라우저 설정에서 이 사이트를 예외로 추가해 주세요.';
+  }else{
+    el.innerHTML = '⚪ 저장 상태를 확인할 수 없어요';
+  }
 }
 
 /* ============================================================
@@ -1435,7 +1486,7 @@ function renderSyncStatus(){
    오래된 서비스워커가 남아 있으면 GitHub 통신이 막히는 문제가 있었다.
    그래서 버전을 확인해 다르면 한 번만 자동으로 완전 새로고침한다.
    ============================================================ */
-const SW_EXPECTED = 'linkarchive-v13';
+const SW_EXPECTED = 'linkarchive-v14';
 
 // 실행 중인 서비스워커의 버전을 물어본다
 async function swVersion(){
@@ -1509,6 +1560,7 @@ async function runDiagnostics(){
   out.innerHTML = L.join('<br>');
 }
 
+ensurePersistentStorage();
 updateBadge();
 setCloudIcon('☁️');
 if(settings.ghToken) syncNow(false); // 앱을 열면 다른 기기의 변경 사항을 가져온다
