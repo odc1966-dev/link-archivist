@@ -260,6 +260,7 @@ nav button.on{color:var(--primary)}
     <input id="search" type="search" placeholder="🔍 제목·메모·주소 검색" oninput="renderArchive()">
     <div id="folder-filter"></div>
     <div id="archive-list"></div>
+    <button class="btn btn-outline" onclick="reclassifyArchive()">✨ AI로 제목·폴더 다시 정리</button>
     <button class="btn btn-outline" onclick="openFolderManager()">🗂️ 폴더 관리</button>
   </section>
 </main>
@@ -544,21 +545,56 @@ ${list}
 [{"url":"...","title":"...","folder":"...","memo":"..."}]`;
 }
 
+/* Gemini 호출.
+   모델 이름은 시간이 지나면 바뀔 수 있어서, 없는 모델이면
+   사용 가능한 모델 목록을 받아 자동으로 골라 다시 시도한다. */
+function geminiError(status, bodyText){
+  let msg = '';
+  try{ msg = (JSON.parse(bodyText).error || {}).message || ''; }catch(e){}
+  if(status === 400 && /API key not valid/i.test(msg)) return 'API 키가 올바르지 않아요. 다시 확인해 주세요';
+  if(status === 429) return '오늘 무료 사용량을 다 썼어요. 잠시 후 다시 시도해 주세요';
+  if(status === 403) return 'API 키에 권한이 없어요 (키를 새로 만들어 보세요)';
+  return 'Gemini 오류 ' + status + (msg ? ': ' + msg.slice(0, 120) : '');
+}
+async function geminiPickModel(key){
+  const res = await fetch('https://generativelanguage.googleapis.com/v1beta/models', {
+    headers:{ 'x-goog-api-key': key }
+  });
+  if(!res.ok) return null;
+  const data = await res.json();
+  const usable = (data.models || [])
+    .filter(m => (m.supportedGenerationMethods || []).includes('generateContent'))
+    .map(m => String(m.name).replace(/^models\//, ''));
+  // 빠르고 무료 사용량이 넉넉한 flash 계열을 우선 고른다
+  return usable.find(n => /flash/i.test(n) && !/(thinking|image|tts|live|vision|embedding)/i.test(n))
+      || usable.find(n => /pro/i.test(n) && !/(vision|embedding)/i.test(n))
+      || usable[0] || null;
+}
+async function callGemini(model, key, prompt){
+  const send = m => fetch(`https://generativelanguage.googleapis.com/v1beta/models/${m}:generateContent`, {
+    method:'POST',
+    headers:{ 'Content-Type':'application/json', 'x-goog-api-key': key },
+    body: JSON.stringify({ contents:[{ parts:[{ text: prompt }] }] })
+  });
+  let res = await send(model);
+  if(res.status === 404){
+    // 모델 이름이 바뀐 경우: 쓸 수 있는 모델을 찾아 저장해 두고 재시도
+    const alt = await geminiPickModel(key);
+    if(alt && alt !== model){
+      settings.model = alt; save(LS.settings, settings);
+      res = await send(alt);
+    }
+  }
+  if(!res.ok) throw new Error(geminiError(res.status, await res.text()));
+  const data = await res.json();
+  return data.candidates?.[0]?.content?.parts?.[0]?.text || '';
+}
 async function callLLM(prompt){
   const provider = settings.provider;
   const model = settings.model || DEFAULT_MODELS[provider];
   const key = settings.apiKey;
 
-  if(provider === 'gemini'){
-    const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
-      method:'POST',
-      headers:{ 'Content-Type':'application/json', 'x-goog-api-key': key },
-      body: JSON.stringify({ contents:[{ parts:[{ text: prompt }] }] })
-    });
-    if(!res.ok) throw new Error(`Gemini 오류 ${res.status}: ${(await res.text()).slice(0,200)}`);
-    const data = await res.json();
-    return data.candidates?.[0]?.content?.parts?.[0]?.text || '';
-  }
+  if(provider === 'gemini') return callGemini(model, key, prompt);
   if(provider === 'claude'){
     const res = await fetch('https://api.anthropic.com/v1/messages', {
       method:'POST',
@@ -856,6 +892,57 @@ function deleteItem(id){
   toast('삭제했어요');
 }
 
+/* 이미 보관함에 저장된 링크의 제목·폴더를 AI로 다시 정리한다.
+   DM 문맥이 남아 있지 않으므로 주소만 보고 추정한다(완벽하진 않다). */
+async function reclassifyArchive(){
+  if(!settings.apiKey){ toast('먼저 AI API 키를 입력하고 저장하세요'); return; }
+  if(items.length === 0){ toast('보관함이 비어 있어요'); return; }
+  if(!confirm(`보관함의 링크 ${items.length}개를 AI로 다시 정리할까요?\n제목과 폴더가 바뀔 수 있습니다.`)) return;
+
+  const loading = document.getElementById('loading');
+  const label = document.getElementById('loading-text');
+  loading.classList.add('on');
+  let done = 0, changed = 0;
+  try{
+    for(let i = 0; i < items.length; i += 20){
+      const batch = items.slice(i, i + 20);
+      label.textContent = `AI가 정리하는 중… (${done}/${items.length})`;
+      const list = batch.map((it, n) => `${n+1}. URL: ${it.url}\n   현재 제목: ${it.title}`).join('\n');
+      const prompt = `아래는 저장된 웹 링크 목록입니다. 주소(경로에 들어 있는 단어 포함)를 근거로 각 링크가 어떤 자료인지 추정해 주세요.
+
+각 링크마다:
+1) title: 한국어 제목 (40자 이내). 무엇에 대한 자료인지 알 수 있게. 추정이 어려우면 사이트 이름을 활용
+2) folder: 반드시 다음 중 하나 → ${folders.join(', ')}
+3) memo: 한 줄 메모 (30자 이내, 없으면 빈 문자열)
+
+링크 목록:
+${list}
+
+다른 설명 없이 아래 형식의 JSON 배열로만 답하세요:
+[{"url":"...","title":"...","folder":"...","memo":"..."}]`;
+      const parsed = parseJsonArray(await callLLM(prompt));
+      const ts = new Date().toISOString();
+      for(const it of batch){
+        const hit = parsed.find(x => x.url === it.url);
+        if(!hit) continue;
+        if(hit.title && String(hit.title).trim() && String(hit.title) !== it.title){
+          it.title = String(hit.title).slice(0, 60); changed++;
+        }
+        if(hit.folder && folders.includes(hit.folder)) it.folder = hit.folder;
+        if(hit.memo) it.memo = String(hit.memo).slice(0, 60);
+        it.updatedAt = ts;
+      }
+      done += batch.length;
+    }
+    persistAll(); renderArchive();
+    toast(`정리 완료 — 제목 ${changed}개를 다듬었어요`);
+  }catch(err){
+    console.error(err);
+    toast('정리 실패: ' + String(err.message).slice(0, 60));
+  }finally{
+    loading.classList.remove('on');
+  }
+}
 /* ============================================================
    폴더 관리 (추가 / 이름변경 / 삭제)
    ============================================================ */
@@ -1243,7 +1330,7 @@ function renderSyncStatus(){
    오래된 서비스워커가 남아 있으면 GitHub 통신이 막히는 문제가 있었다.
    그래서 버전을 확인해 다르면 한 번만 자동으로 완전 새로고침한다.
    ============================================================ */
-const SW_EXPECTED = 'linkarchive-v8';
+const SW_EXPECTED = 'linkarchive-v9';
 
 // 실행 중인 서비스워커의 버전을 물어본다
 async function swVersion(){
