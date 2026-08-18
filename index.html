@@ -1243,7 +1243,7 @@ function renderSyncStatus(){
    오래된 서비스워커가 남아 있으면 GitHub 통신이 막히는 문제가 있었다.
    그래서 버전을 확인해 다르면 한 번만 자동으로 완전 새로고침한다.
    ============================================================ */
-const SW_EXPECTED = 'linkarchive-v7';
+const SW_EXPECTED = 'linkarchive-v8';
 
 // 실행 중인 서비스워커의 버전을 물어본다
 async function swVersion(){
@@ -1279,21 +1279,35 @@ async function initServiceWorker(){
     }
   }catch(e){}
 }
-// 문제가 어디서 막히는지 단계별로 확인해 보여준다
+// 문제가 어디서 막히는지 단계별로 확인해 보여준다.
+// CORS 방식과 no-cors 방식을 나눠 재 봄으로써
+// "네트워크가 아예 막힘"과 "연결은 되는데 브라우저 규칙에 걸림"을 구분한다.
+async function probe(label, url, noCors){
+  const t0 = performance.now();
+  try{
+    const r = await fetch(url, noCors ? { cache:'no-store', mode:'no-cors' } : { cache:'no-store' });
+    const ms = Math.round(performance.now() - t0);
+    if(noCors) return label + ': 🟢 연결됨 (' + ms + 'ms)';
+    return label + ': ' + (r.ok ? '🟢 정상 ' + r.status : '🟡 응답 ' + r.status) + ' (' + ms + 'ms)';
+  }catch(e){
+    return label + ': 🔴 실패 — ' + esc(e.message || e.name);
+  }
+}
 async function runDiagnostics(){
   const out = document.getElementById('diag-out');
-  out.innerHTML = '진단 중…';
+  out.innerHTML = '진단 중… (10초 정도 걸릴 수 있어요)';
   const L = [];
   L.push('인터넷: ' + (navigator.onLine ? '🟢 연결됨' : '🔴 끊김'));
   const ver = await swVersion();
   L.push('앱 버전: ' + (ver === null ? '(서비스워커 없음)' : esc(ver)) +
     (ver === SW_EXPECTED || ver === null ? ' 🟢' : ' 🔴 오래된 버전 → [앱 완전 새로고침]을 눌러주세요'));
-  try{
-    const r = await fetch('https://api.github.com/zen', { cache:'no-store' });
-    L.push('GitHub 접속: ' + (r.ok ? '🟢 정상' : '🟡 응답 ' + r.status));
-  }catch(e){
-    L.push('GitHub 접속: 🔴 실패 (네트워크 차단 또는 오래된 앱 버전)');
-  }
+
+  L.push(await probe('① 앱 서버', location.origin + '/manifest.json?t=' + Date.now()));
+  L.push(await probe('② 일반 인터넷', 'https://www.google.com/favicon.ico?t=' + Date.now(), true));
+  L.push(await probe('③ GitHub 사이트', 'https://github.com/favicon.ico?t=' + Date.now(), true));
+  L.push(await probe('④ GitHub API(연결)', 'https://api.github.com/zen?t=' + Date.now(), true));
+  L.push(await probe('⑤ GitHub API(실제)', 'https://api.github.com/zen'));
+
   if(settings.ghToken){
     try{ L.push('토큰 확인: 🟢 ' + esc(await ghLogin())); }
     catch(e){ L.push('토큰 확인: 🔴 ' + esc(e.message)); }
