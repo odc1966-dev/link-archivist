@@ -319,6 +319,9 @@ nav button.on{color:var(--primary)}
       <button class="btn btn-outline" style="flex:1" onclick="hardRefresh(true)">🔄 앱 완전 새로고침</button>
     </div>
     <p id="diag-out" class="hint" style="text-align:left;margin:8px 0 0"></p>
+    <p class="section-title" style="margin-top:24px">앱 설치</p>
+    <p id="install-status" class="hint" style="text-align:left;margin:0 0 10px"></p>
+    <button class="btn btn-primary" id="install-btn" onclick="installApp()">📲 앱으로 설치하기</button>
     <p class="section-title" style="margin-top:24px">데이터 관리</p>
     <p id="storage-status" class="hint" style="text-align:left;margin:0 0 10px"></p>
     <button class="btn btn-outline" onclick="exportData()">⬇️ 백업 파일 내보내기 (JSON)</button>
@@ -1108,6 +1111,7 @@ function openSettings(){
   renderSyncStatus();
   renderTokenCheck();
   renderStorageStatus();
+  renderInstallStatus();
   document.getElementById('settings-modal').classList.add('on');
 }
 function onProviderChange(){
@@ -1224,6 +1228,52 @@ function importData(e){
 }
 /* 브라우저가 데이터를 지우지 않도록 '영구 저장'을 요청한다.
    시크릿 창이나 '종료 시 데이터 삭제' 설정에서는 허용되지 않는다. */
+/* 앱 설치(PWA)
+   브라우저가 설치 가능하다고 알려주면(beforeinstallprompt) 그 기회를 붙잡아 두었다가
+   사용자가 버튼을 누를 때 설치 창을 띄운다. */
+let deferredInstall = null;
+window.addEventListener('beforeinstallprompt', e => {
+  e.preventDefault();
+  deferredInstall = e;
+  renderInstallStatus();
+});
+window.addEventListener('appinstalled', () => {
+  deferredInstall = null;
+  toast('설치 완료! 이제 홈 화면/시작 메뉴에서 열 수 있어요');
+  renderInstallStatus();
+});
+function isInstalled(){
+  return window.matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
+}
+async function installApp(){
+  if(isInstalled()){ toast('이미 앱으로 실행 중이에요'); return; }
+  if(!deferredInstall){
+    toast('브라우저 메뉴에서 "앱 설치"를 선택해 주세요');
+    return;
+  }
+  deferredInstall.prompt();
+  try{
+    const { outcome } = await deferredInstall.userChoice;
+    toast(outcome === 'accepted' ? '설치를 시작했어요' : '설치를 취소했어요');
+  }catch(e){}
+  deferredInstall = null;
+  renderInstallStatus();
+}
+function renderInstallStatus(){
+  const el = document.getElementById('install-status');
+  const btn = document.getElementById('install-btn');
+  if(!el || !btn) return;
+  if(isInstalled()){
+    el.innerHTML = '🟢 앱으로 실행 중입니다 (데이터가 안전하게 유지돼요)';
+    btn.style.display = 'none';
+  }else if(deferredInstall){
+    el.innerHTML = '⚪ 아직 브라우저에서 열려 있어요. 설치하면 데이터가 더 안전하게 유지됩니다';
+    btn.style.display = '';
+  }else{
+    el.innerHTML = '⚪ 브라우저 주소창의 설치 아이콘(⊕) 또는 메뉴 → "앱 설치"로 설치할 수 있어요';
+    btn.style.display = '';
+  }
+}
 let storagePersisted = null;
 async function ensurePersistentStorage(){
   try{
@@ -1486,7 +1536,7 @@ function renderSyncStatus(){
    오래된 서비스워커가 남아 있으면 GitHub 통신이 막히는 문제가 있었다.
    그래서 버전을 확인해 다르면 한 번만 자동으로 완전 새로고침한다.
    ============================================================ */
-const SW_EXPECTED = 'linkarchive-v14';
+const SW_EXPECTED = 'linkarchive-v15';
 
 // 실행 중인 서비스워커의 버전을 물어본다
 async function swVersion(){
