@@ -1302,7 +1302,7 @@ async function runDiagnostics(){
   L.push('앱 버전: ' + (ver === null ? '(서비스워커 없음)' : esc(ver)) +
     (ver === SW_EXPECTED || ver === null ? ' 🟢' : ' 🔴 오래된 버전 → [앱 완전 새로고침]을 눌러주세요'));
 
-  L.push(await probe('① 앱 서버', location.origin + '/manifest.json?t=' + Date.now()));
+  L.push(await probe('① 앱 서버', new URL('manifest.json?t=' + Date.now(), location.href).href)); // 하위 경로 배포(/link-archivist/)를 고려해 상대 경로로 계산
   L.push(await probe('② 일반 인터넷', 'https://www.google.com/favicon.ico?t=' + Date.now(), true));
   L.push(await probe('③ GitHub 사이트', 'https://github.com/favicon.ico?t=' + Date.now(), true));
   L.push(await probe('④ GitHub API(연결)', 'https://api.github.com/zen?t=' + Date.now(), true));
