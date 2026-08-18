@@ -278,7 +278,7 @@ nav button.on{color:var(--primary)}
 <!-- ========== 설정 모달 ========== -->
 <div class="modal-bg" id="settings-modal">
   <div class="modal">
-    <h2>⚙️ 설정 <button onclick="closeModal('settings-modal')">✕</button></h2>
+    <h2>⚙️ 설정 <span id="app-ver" style="font-size:.7rem;font-weight:400;color:var(--text-sub)"></span> <button onclick="closeModal('settings-modal')">✕</button></h2>
     <div class="field">
       <label>AI 서비스</label>
       <select id="set-provider" onchange="onProviderChange()">
@@ -559,35 +559,65 @@ function geminiError(status, bodyText){
   return 'Gemini 오류 ' + status + (msg ? ': ' + msg.slice(0, 120) : '');
 }
 // 이 키로 실제 쓸 수 있는 모델 목록을 가져온다 (모델 이름은 시간이 지나면 바뀐다)
+// 이 키로 실제 쓸 수 있는 모델 목록을 가져온다 (API 버전이 다를 수 있어 v1beta → v1 순으로 시도)
 async function geminiListModels(key){
-  let res;
-  try{
-    res = await fetch('https://generativelanguage.googleapis.com/v1beta/models?pageSize=100', {
-      headers:{ 'x-goog-api-key': key }
-    });
-  }catch(e){ return { ok:false, models:[], error:'네트워크 연결 실패' }; }
-  if(!res.ok) return { ok:false, models:[], error: geminiError(res.status, await res.text()) };
+  let last = { ok:false, models:[], error:'알 수 없음' };
+  for(const ver of ['v1beta', 'v1']){
+    let res;
+    try{
+      res = await fetch(`https://generativelanguage.googleapis.com/${ver}/models?pageSize=200`, {
+        headers:{ 'x-goog-api-key': key }
+      });
+    }catch(e){ last = { ok:false, models:[], error:'네트워크 연결 실패' }; continue; }
+    if(!res.ok){ last = { ok:false, models:[], error: geminiError(res.status, await res.text()) }; continue; }
+    const data = await res.json();
+    const models = (data.models || [])
+      .filter(m => (m.supportedGenerationMethods || []).includes('generateContent'))
+      .map(m => String(m.name).replace(/^models\//, ''))
+      .filter(n => !/(embedding|aqa|image|tts|live|audio)/i.test(n));
+    if(models.length) return { ok:true, models, error:'', ver };
+    last = { ok:true, models:[], error:'', ver };
+  }
+  return last;
+}
+async function callGemini(model, key, prompt){
+  const body = JSON.stringify({ contents:[{ parts:[{ text: prompt }] }] });
+  const send = (m, ver) => fetch(`https://generativelanguage.googleapis.com/${ver}/models/${m}:generateContent`, {
+    method:'POST', headers:{ 'Content-Type':'application/json', 'x-goog-api-key': key }, body
+  });
+  let res = await send(model, 'v1beta');
+  if(res.status === 404) res = await send(model, 'v1');   // API 버전이 바뀐 경우 대비
+  if(res.status === 404){
+    // 모델이 없는 경우: 이 키로 쓸 수 있는 모델을 찾아 저장해 두고 재시도
+    const info = await geminiListModels(key);
+    if(!info.ok) throw new Error(`'${model}' 모델을 못 찾았고 목록 조회도 실패했어요 (${info.error})`);
+    const alt = pickBestModel(info.models);
+    if(!alt) throw new Error(`이 API 키로 쓸 수 있는 모델이 하나도 없어요. 키를 새로 만들어 보세요`);
+    if(alt !== model){
+      settings.model = alt; save(LS.settings, settings);
+      res = await send(alt, info.ver || 'v1beta');
+    }
+    if(res.status === 404) throw new Error(`모델을 찾지 못했어요. [쓸 수 있는 모델 불러오기]로 직접 골라 주세요`);
+  }
+  if(!res.ok) throw new Error(geminiError(res.status, await res.text()));
   const data = await res.json();
-  const models = (data.models || [])
-    .filter(m => (m.supportedGenerationMethods || []).includes('generateContent'))
-    .map(m => String(m.name).replace(/^models\//, ''))
-    .filter(n => !/(embedding|aqa|vision|image|tts|live|audio)/i.test(n));
-  return { ok:true, models, error:'' };
+  return data.candidates?.[0]?.content?.parts?.[0]?.text || '';
 }
 // 설정 화면에서 모델을 눌러 고를 수 있게 보여준다
-async function loadGeminiModels(){
+async function loadGeminiModels(append){
   const box = document.getElementById('model-list');
   if(document.getElementById('set-provider').value !== 'gemini'){
     box.innerHTML = '이 기능은 Gemini에서만 쓸 수 있어요'; return;
   }
   const key = document.getElementById('set-key').value.trim();
   if(!key){ toast('먼저 API 키를 입력하세요'); return; }
-  box.innerHTML = '불러오는 중…';
+  const head = append ? box.innerHTML + '<br><br>' : '';
+  box.innerHTML = head + '모델 목록 확인 중…';
   const info = await geminiListModels(key);
-  if(!info.ok){ box.innerHTML = '🔴 ' + esc(info.error); return; }
-  if(!info.models.length){ box.innerHTML = '🔴 이 키로 쓸 수 있는 모델이 없어요'; return; }
+  if(!info.ok){ box.innerHTML = head + '🔴 모델 목록 조회 실패: ' + esc(info.error); return; }
+  if(!info.models.length){ box.innerHTML = head + '🔴 이 키로 쓸 수 있는 모델이 없어요'; return; }
   const best = pickBestModel(info.models);
-  box.innerHTML = '누르면 선택됩니다 (권장: 이름에 flash가 든 것)<br>' +
+  box.innerHTML = head + '누르면 선택됩니다 (권장: 이름에 flash가 든 것)<br>' +
     info.models.map(n => '<button class="chip" style="margin:4px 4px 0 0"' +
       (n === best ? ' data-best="1"' : '') +
       ' onclick="pickModel(this.textContent)">' + esc(n) + '</button>').join('');
@@ -603,35 +633,6 @@ function pickBestModel(list){
       || list.find(n => /flash/i.test(n))
       || list.find(n => /pro/i.test(n) && !/(preview|exp)/i.test(n))
       || list[0] || null;
-}
-async function callGemini(model, key, prompt){
-  const send = m => fetch(`https://generativelanguage.googleapis.com/v1beta/models/${m}:generateContent`, {
-    method:'POST',
-    headers:{ 'Content-Type':'application/json', 'x-goog-api-key': key },
-    body: JSON.stringify({ contents:[{ parts:[{ text: prompt }] }] })
-  });
-  let res = await send(model);
-  if(res.status === 404){
-    // 모델 이름은 시간이 지나면 은퇴한다. 쓸 수 있는 모델을 찾아 저장해 두고 재시도.
-    const info = await geminiListModels(key);
-    if(!info.ok){
-      throw new Error(`'${model}' 모델이 없는데 대체 목록도 못 불러왔어요 (${info.error})`);
-    }
-    const alt = pickBestModel(info.models);
-    if(!alt){
-      throw new Error(`'${model}' 모델이 없고, 이 키로 쓸 수 있는 모델도 없어요`);
-    }
-    if(alt !== model){
-      settings.model = alt; save(LS.settings, settings);
-      res = await send(alt);
-      if(res.status === 404){
-        throw new Error(`모델을 찾지 못했어요. 설정에서 [쓸 수 있는 모델 불러오기]로 직접 골라 주세요`);
-      }
-    }
-  }
-  if(!res.ok) throw new Error(geminiError(res.status, await res.text()));
-  const data = await res.json();
-  return data.candidates?.[0]?.content?.parts?.[0]?.text || '';
 }
 async function callLLM(prompt){
   const provider = settings.provider;
@@ -1059,6 +1060,7 @@ function openSettings(){
   document.getElementById('set-autodl').checked = settings.autoDownload !== false; // 기본 켜짐
   document.getElementById('set-ghtoken').value = settings.ghToken || '';
   onProviderChange();
+  document.getElementById('app-ver').textContent = SW_EXPECTED.replace('linkarchive-','앱 ');
   renderSyncStatus();
   renderTokenCheck();
   document.getElementById('settings-modal').classList.add('on');
@@ -1099,11 +1101,16 @@ async function testApi(){
   if(!form.apiKey){ toast('API 키를 먼저 입력하세요'); return; }
   settings = Object.assign({}, prev, form);
   toast('연결 확인 중…');
+  let failed = false;
   try{
     const reply = await callLLM('"OK"라고만 답하세요.');
     toast(reply ? '✅ 연결 성공!' : '응답이 비어 있어요');
+    document.getElementById('model-list').innerHTML =
+      '🟢 사용 중인 모델: ' + esc(settings.model || DEFAULT_MODELS[settings.provider]);
   }catch(err){
+    failed = true;
     toast('❌ ' + String(err.message).slice(0, 90));
+    document.getElementById('model-list').innerHTML = '🔴 ' + esc(String(err.message));
   }finally{
     // 모델이 자동으로 대체됐다면 입력칸에 반영해 준다 (저장을 누르면 남는다)
     const found = settings.model;
@@ -1111,6 +1118,8 @@ async function testApi(){
     settings = prev;
     save(LS.settings, settings); // 테스트 중 덮어써졌을 수 있으니 원래 설정을 되돌려 놓는다
   }
+  // 실패했으면 원인을 바로 알 수 있게 모델 목록까지 이어서 보여준다
+  if(failed && form.provider === 'gemini') await loadGeminiModels(true);
 }
 
 // 백업 내보내기 / 가져오기
@@ -1381,7 +1390,7 @@ function renderSyncStatus(){
    오래된 서비스워커가 남아 있으면 GitHub 통신이 막히는 문제가 있었다.
    그래서 버전을 확인해 다르면 한 번만 자동으로 완전 새로고침한다.
    ============================================================ */
-const SW_EXPECTED = 'linkarchive-v11';
+const SW_EXPECTED = 'linkarchive-v12';
 
 // 실행 중인 서비스워커의 버전을 물어본다
 async function swVersion(){
