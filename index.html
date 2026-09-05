@@ -1,4 +1,12 @@
 <!DOCTYPE html>
+<!--
+  링크보관함 — DM 링크 자동 정리
+  Copyright (c) 2026 OK. All rights reserved.
+  배포본 번호: __BUILD_CODE__
+
+  이 프로그램의 저작권은 제작자에게 있습니다.
+  제작자의 동의 없는 재배포·수정·상업적 이용을 금합니다.
+-->
 <html lang="ko">
 <head>
 <meta charset="UTF-8">
@@ -226,6 +234,69 @@ nav button.on{color:var(--primary)}
   overflow:hidden;text-overflow:ellipsis;
 }
 #toast.on{opacity:1;transform:translateX(-50%) translateY(0)}
+
+/* ---------- 4. 메모 화면 ---------- */
+#memo-filter{display:flex;gap:6px;overflow-x:auto;margin:12px 0;padding-bottom:2px;scrollbar-width:none}
+#memo-filter::-webkit-scrollbar{display:none}
+.memo-card{
+  background:var(--card);border-radius:var(--radius);box-shadow:var(--shadow);
+  padding:14px;margin-bottom:10px;cursor:pointer;
+}
+.memo-card-head{display:flex;align-items:flex-start;gap:8px}
+.memo-card-title{flex:1;font-size:.96rem;font-weight:700;line-height:1.4;word-break:break-all}
+.memo-card-body{font-size:.83rem;color:var(--text-sub);margin-top:6px;line-height:1.5;
+  display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.memo-card-meta{display:flex;align-items:center;gap:6px;margin-top:9px;flex-wrap:wrap}
+.tagpill{font-size:.71rem;font-weight:700;color:var(--primary);background:var(--primary-light);padding:3px 9px;border-radius:20px}
+.tagpill.auto{color:var(--text-sub);background:#F1F2F6}
+.tagpill.x{cursor:pointer}
+.memo-stats{
+  display:flex;gap:10px;background:var(--card);border-radius:var(--radius);box-shadow:var(--shadow);
+  padding:11px 14px;margin-bottom:10px;
+}
+.memo-stats div{flex:1;text-align:center;line-height:1.3}
+.memo-stats b{display:block;font-size:1.05rem;color:var(--primary);font-variant-numeric:tabular-nums}
+.memo-stats span{font-size:.68rem;color:var(--text-sub)}
+.fab{
+  position:fixed;right:calc(50% - 280px + 16px);bottom:80px;z-index:41;
+  width:56px;height:56px;border-radius:50%;border:none;cursor:pointer;
+  background:var(--primary);color:#fff;font-size:1.6rem;line-height:1;
+  box-shadow:0 4px 14px rgba(79,70,229,.45);
+}
+@media(max-width:592px){.fab{right:16px}}
+
+/* ---------- 5. 메모 편집 화면 ---------- */
+.edit-bar{display:flex;align-items:center;gap:6px;margin:6px 0 10px}
+.edit-bar .grow{flex:1}
+.icon-sm{background:none;border:none;font-size:1.15rem;cursor:pointer;padding:6px;border-radius:8px;color:var(--text-sub)}
+.icon-sm.on{background:var(--primary-light)}
+#memo-title{
+  width:100%;padding:12px 14px;border:1.5px solid var(--border);border-radius:var(--radius);
+  font-size:1rem;font-weight:700;font-family:inherit;background:var(--card);box-shadow:var(--shadow);color:var(--text);
+}
+#memo-body{
+  width:100%;min-height:240px;resize:vertical;margin-top:10px;
+  border:1.5px solid var(--border);border-radius:var(--radius);
+  padding:14px;font-size:.95rem;line-height:1.65;font-family:inherit;
+  background:var(--card);box-shadow:var(--shadow);color:var(--text);
+}
+#memo-title:focus,#memo-body:focus{outline:none;border-color:var(--primary)}
+.tag-input-row{display:flex;gap:8px;margin-top:10px}
+.tag-input-row input{
+  flex:1;padding:10px 12px;border:1.5px solid var(--border);border-radius:10px;
+  font-size:.88rem;font-family:inherit;background:var(--card);color:var(--text);
+}
+.tag-input-row input:focus{outline:none;border-color:var(--primary)}
+.panel{background:var(--card);border-radius:var(--radius);box-shadow:var(--shadow);padding:14px;margin-top:12px}
+.panel h3{font-size:.82rem;color:var(--text-sub);margin-bottom:8px}
+.panel ul{margin:0;padding-left:18px}
+.panel li{font-size:.88rem;line-height:1.6;margin-bottom:4px}
+.todo-row{display:flex;align-items:flex-start;gap:9px;padding:7px 0}
+.todo-row input{width:19px;height:19px;flex-shrink:0;margin-top:1px;accent-color:var(--primary)}
+.todo-row label{flex:1;font-size:.9rem;line-height:1.45}
+.todo-row.done label{text-decoration:line-through;color:var(--text-sub)}
+.todo-row button{background:none;border:none;color:var(--text-sub);cursor:pointer;font-size:.95rem;padding:0 2px}
+.save-mark{font-size:.72rem;color:var(--text-sub);white-space:nowrap}
 </style>
 </head>
 <body>
@@ -263,12 +334,45 @@ nav button.on{color:var(--primary)}
     <button class="btn btn-outline" onclick="reclassifyArchive()">✨ AI로 제목·폴더 다시 정리</button>
     <button class="btn btn-outline" onclick="openFolderManager()">🗂️ 폴더 관리</button>
   </section>
+
+  <!-- ========== 4. 메모 화면 ========== -->
+  <section id="view-memo" class="view">
+    <div class="memo-stats" id="memo-stats"></div>
+    <input id="memo-search" type="search" placeholder="🔍 제목·본문·태그 검색" oninput="renderMemoList()">
+    <div id="memo-filter"></div>
+    <div id="memo-list"></div>
+  </section>
+
+  <!-- ========== 5. 메모 편집 화면 ========== -->
+  <section id="view-memoedit" class="view">
+    <div class="edit-bar">
+      <button class="icon-sm" onclick="closeMemoEditor()" title="목록으로">←</button>
+      <span class="save-mark" id="memo-savemark"></span>
+      <span class="grow"></span>
+      <button class="icon-sm" id="memo-pin-btn" onclick="toggleMemoFlag('pinned')" title="고정">📌</button>
+      <button class="icon-sm" id="memo-arch-btn" onclick="toggleMemoFlag('archived')" title="보관함으로">📥</button>
+      <button class="icon-sm" onclick="openMemoMenu()" title="더보기">⋯</button>
+    </div>
+    <input id="memo-title" type="text" placeholder="제목 (비우면 첫 줄이 제목이 돼요)" oninput="onMemoInput()">
+    <textarea id="memo-body" placeholder="내용을 입력하세요…&#10;- 로 시작하는 줄과 '~하기'로 끝나는 문장은 할 일로 자동 인식됩니다." oninput="onMemoInput()"></textarea>
+    <div id="memo-tags" class="memo-card-meta"></div>
+    <div class="tag-input-row">
+      <input id="memo-tag-input" type="text" placeholder="태그 입력 후 Enter" onkeydown="onTagKey(event)">
+      <button class="mini-btn" style="padding:0 16px" onclick="addMemoTag()">추가</button>
+    </div>
+    <button class="btn btn-primary" onclick="analyzeMemo(true)">✨ AI로 요약·할일 정리</button>
+    <button class="btn btn-outline" onclick="analyzeMemo(false)">⚡ 키 없이 바로 요약 (기기 안에서 계산)</button>
+    <div class="panel" id="memo-summary-panel" style="display:none"></div>
+    <div class="panel" id="memo-todo-panel" style="display:none"></div>
+    <button class="btn btn-outline" onclick="memoLinksToArchive()">🔗 메모 속 링크를 보관함으로 보내기</button>
+  </section>
 </main>
 
 <!-- ========== 하단 탭 ========== -->
 <nav>
   <button id="tab-input" class="on" onclick="showView('input')"><span class="ni">✏️</span>입력</button>
   <button id="tab-review" onclick="showView('review')"><span class="ni">🔎</span>검토<span class="badge" id="review-badge" style="display:none">0</span></button>
+  <button id="tab-memo" onclick="showView('memo')"><span class="ni">📝</span>메모</button>
   <button id="tab-archive" onclick="showView('archive')"><span class="ni">📚</span>보관함</button>
 </nav>
 
@@ -350,13 +454,177 @@ nav button.on{color:var(--primary)}
   <div class="modal" id="item-modal-body"></div>
 </div>
 
+<button class="fab" id="memo-fab" onclick="createMemo()" title="새 메모" style="display:none">✚</button>
 <div id="toast"></div>
+
+<script>
+/* ============================================================
+   메모 엔진 (원클립 AI메모장에서 이식) — window.OneClip
+   한국어 키워드 추출 · TextRank 요약 · 할 일 추출 · 검색/통계
+   ============================================================ */
+(function(global){
+'use strict';
+
+const STOPWORDS = new Set(['그리고','그래서','하지만','그러나','또한','또는','및','등','것','수','때','더','좀','바로','정말','매우','오늘','내일','어제','이번','저번','다음','우리','저희','제가','내가','너무','있다','없다','한다','했다','합니다','있습니다','없습니다','됩니다','입니다','대한','위한','통해','관련','경우','부분','내용','정도','이후','이전','현재','기존']);
+const JOSA = ['은','는','이','가','을','를','에게','에서','으로','로','과','와','도','만','까지','부터','에','의','랑','이나','나','께서'];
+
+function stripJosa(word){
+  if(word.length < 2) return word;
+  for(const j of JOSA.sort((a,b)=>b.length-a.length)){
+    if(word.endsWith(j) && word.length - j.length >= 2) return word.slice(0, word.length - j.length);
+  }
+  return word;
+}
+
+/** 한국어 키워드 추출 → 자동 태그 */
+function extractKeywords(text, topN = 4){
+  if(!text) return [];
+  const tokens = text.replace(/[^\uAC00-\uD7A3a-zA-Z0-9\s]/g,' ').split(/\s+/).filter(Boolean);
+  const freq = new Map();
+  for(const t of tokens){
+    const w = stripJosa(t);
+    if(w.length < 2 || /^\d+$/.test(w) || STOPWORDS.has(w)) continue;
+    freq.set(w, (freq.get(w)||0) + 1);
+  }
+  return [...freq.entries()]
+    .filter(([,n]) => n >= 2)
+    .sort((a,b) => b[1]-a[1] || b[0].length-a[0].length)
+    .slice(0, topN)
+    .map(([w]) => w);
+}
+
+function splitSentences(text){
+  return text.split(/(?<=[.!?。])\s+|\n+/).map(s=>s.trim()).filter(s=>s.length >= 8);
+}
+function contentWords(sent){
+  const out = new Set();
+  for(const t of sent.replace(/[^\uAC00-\uD7A3a-zA-Z0-9\s]/g,' ').split(/\s+/)){
+    const w = stripJosa(t);
+    if(w.length >= 2 && !/^\d+$/.test(w) && !STOPWORDS.has(w)) out.add(w);
+  }
+  return out;
+}
+
+/** 정밀 추출 요약 — TextRank
+ *  문장 간 어휘 중첩으로 유사도 그래프를 만들고 PageRank로 중심 문장을 뽑는다.
+ *  빈도 기반보다 '글 전체를 대표하는 문장'을 안정적으로 선택한다. */
+function summarize(text, maxSent = 3){
+  if(!text || !text.trim()) return [];
+  const sents = splitSentences(text);
+  if(sents.length <= maxSent) return sents;
+
+  const words = sents.map(contentWords);
+  const n = sents.length;
+  const sim = Array.from({length:n}, ()=>new Float64Array(n));
+  for(let i=0;i<n;i++) for(let j=i+1;j<n;j++){
+    let ov = 0;
+    for(const w of words[i]) if(words[j].has(w)) ov++;
+    const denom = Math.log(words[i].size + 1) + Math.log(words[j].size + 1);
+    const s = denom > 0 ? ov / denom : 0;
+    sim[i][j] = s; sim[j][i] = s;
+  }
+  const outSum = sim.map(row => row.reduce((a,b)=>a+b, 0));
+  let rank = new Float64Array(n).fill(1/n);
+  const d = 0.85;
+  for(let iter=0; iter<30; iter++){
+    const next = new Float64Array(n).fill((1-d)/n);
+    for(let i=0;i<n;i++) for(let j=0;j<n;j++){
+      if(i!==j && outSum[j] > 0) next[i] += d * rank[j] * (sim[j][i] / outSum[j]);
+    }
+    rank = next;
+  }
+  return [...rank.keys()]
+    .map(i=>({i, score: rank[i] + (i===0 ? 0.02 : 0)}))   // 첫 문장 미세 가중
+    .sort((a,b)=>b.score-a.score).slice(0, maxSent)
+    .sort((a,b)=>a.i-b.i).map(o=>sents[o.i]);
+}
+
+/** Claude API용 프롬프트 (JSON 강제) */
+function buildClaudePrompt(text){
+  return '다음 한국어 메모를 분석해 JSON으로만 답하세요. 마크다운 코드펜스나 다른 텍스트 없이 순수 JSON만 출력합니다.\n' +
+    '형식: {"summary":["핵심 요약 문장 3~5개 (자연스러운 한국어로 재작성)"],"topics":["주요 주제 키워드 2~5개"],"todos":["실행할 일 항목 0~8개"]}\n' +
+    '요약은 원문을 그대로 복사하지 말고 핵심을 압축해 다시 쓰세요.\n\n===메모===\n' + text.slice(0, 8000);
+}
+
+/** Claude 응답 파싱: 코드펜스 제거 후 JSON 검증 */
+function parseClaudeJSON(raw){
+  if(!raw) return null;
+  try{
+    const clean = raw.replace(/```json|```/g,'').trim();
+    const d = JSON.parse(clean);
+    return {
+      summary: Array.isArray(d.summary) ? d.summary.filter(s=>typeof s==='string' && s.trim()).slice(0,6) : [],
+      topics:  Array.isArray(d.topics)  ? d.topics.filter(s=>typeof s==='string' && s.trim()).slice(0,6)  : [],
+      todos:   Array.isArray(d.todos)   ? d.todos.filter(s=>typeof s==='string' && s.trim()).slice(0,10)  : []
+    };
+  }catch(e){ return null; }
+}
+
+/** 할 일 추출: 목록 기호 or 행동 종결 패턴 */
+function extractTodos(text){
+  if(!text) return [];
+  const out = [];
+  const seen = new Set();
+  for(const raw of text.split('\n')){
+    const line = raw.trim();
+    if(!line) continue;
+    let item = null;
+    const bullet = line.match(/^[-*•□☐]\s*(.+)$/);
+    if(bullet) item = bullet[1].trim();
+    else if(/(하기|해야\s*(함|한다|합니다)?|할\s*것|예정|까지\s*(제출|완료|마감))\s*[.!]?$/.test(line)) item = line.replace(/[.!]$/,'');
+    if(item && item.length >= 2 && !seen.has(item)){ seen.add(item); out.push(item); }
+  }
+  return out;
+}
+
+/** 검색: 제목·본문·태그 대상, 공백 구분 AND */
+function searchMemos(memos, query){
+  const q = (query||'').trim().toLowerCase();
+  if(!q) return memos;
+  const terms = q.split(/\s+/);
+  return memos.filter(m=>{
+    const hay = (m.title+' '+m.body+' '+m.tags.join(' ')+' '+m.autoTags.join(' ')).toLowerCase();
+    return terms.every(t=>hay.includes(t));
+  });
+}
+
+/** 기록 자산 통계 */
+function computeStats(memos){
+  const live = memos.filter(m=>!m.deleted);
+  const words = live.reduce((n,m)=> n + (m.title+' '+m.body).split(/\s+/).filter(Boolean).length, 0);
+  const tags = new Set();
+  live.forEach(m=>{ m.tags.forEach(t=>tags.add(t)); m.autoTags.forEach(t=>tags.add(t)); });
+  const todosDone = live.reduce((n,m)=> n + m.todos.filter(t=>t.done).length, 0);
+  return { memoCount: live.length, wordCount: words, tagCount: tags.size, todoDoneCount: todosDone };
+}
+
+function newMemo(){
+  const now = Date.now();
+  return { id:'m'+now+Math.random().toString(36).slice(2,7), title:'', body:'',
+           tags:[], autoTags:[], todos:[], summary:[],
+           pinned:false, archived:false, deleted:false, createdAt:now, updatedAt:now };
+}
+
+/** 뷰 필터 + 정렬 (고정 우선, 최신순) */
+function filterMemos(memos, view, tag){
+  let list;
+  if(view === 'trash') list = memos.filter(m=>m.deleted);
+  else if(view === 'archived') list = memos.filter(m=>!m.deleted && m.archived);
+  else if(view === 'pinned') list = memos.filter(m=>!m.deleted && !m.archived && m.pinned);
+  else if(view === 'tag') list = memos.filter(m=>!m.deleted && !m.archived && (m.tags.includes(tag)||m.autoTags.includes(tag)));
+  else list = memos.filter(m=>!m.deleted && !m.archived);
+  return list.sort((a,b)=> (b.pinned-a.pinned) || (b.updatedAt-a.updatedAt));
+}
+
+global.OneClip = { extractKeywords, summarize, extractTodos, searchMemos, computeStats, newMemo, filterMemos, stripJosa, buildClaudePrompt, parseClaudeJSON, splitSentences };
+})(typeof window !== 'undefined' ? window : globalThis);
+</script>
 
 <script>
 /* ============================================================
    상태 및 저장소
    ============================================================ */
-const LS = { items:'linkarchive-items', folders:'linkarchive-folders', settings:'linkarchive-settings', tombs:'linkarchive-tombs' };
+const LS = { items:'linkarchive-items', folders:'linkarchive-folders', settings:'linkarchive-settings', tombs:'linkarchive-tombs', memos:'linkarchive-memos' };
 
 const DEFAULT_FOLDERS = ['작업치료','이스포츠 기획','영양제 정보','생활/주방용품','일반 참고자료'];
 const DEFAULT_MODELS = { gemini:'gemini-2.5-flash', claude:'claude-haiku-4-5-20251001', openai:'gpt-4o-mini' };
@@ -364,9 +632,11 @@ const DEFAULT_MODELS = { gemini:'gemini-2.5-flash', claude:'claude-haiku-4-5-202
 let items    = load(LS.items, []);          // 저장된 링크 [{id,url,title,folder,memo,file,fileKind,createdAt,updatedAt}]
 let folders  = load(LS.folders, DEFAULT_FOLDERS.slice());
 let settings = load(LS.settings, { provider:'gemini', apiKey:'', model:'' });
-let tombs    = load(LS.tombs, { items:[], folders:[] }); // 삭제 기록 — 동기화 시 다른 기기에도 삭제를 전파
+let memos    = load(LS.memos, []);          // 메모 [{id,title,body,tags,autoTags,todos,summary,pinned,archived,deleted,createdAt,updatedAt}]
+let tombs    = load(LS.tombs, { items:[], folders:[], memos:[] }); // 삭제 기록 — 동기화 시 다른 기기에도 삭제를 전파
 let pending  = [];                          // 검토 대기 중인 링크
 let currentFilter = '전체';
+if(!Array.isArray(tombs.memos)) tombs.memos = [];   // 예전 버전에서 올라온 기록 보정
 
 function load(key, fallback){
   try{ const v = localStorage.getItem(key); return v ? JSON.parse(v) : fallback; }
@@ -374,7 +644,7 @@ function load(key, fallback){
 }
 function save(key, val){ localStorage.setItem(key, JSON.stringify(val)); }
 function persistAll(){
-  save(LS.items, items); save(LS.folders, folders); save(LS.tombs, tombs);
+  save(LS.items, items); save(LS.folders, folders); save(LS.tombs, tombs); save(LS.memos, memos);
   scheduleSync(); // 변경이 있으면 잠시 후 자동 동기화
 }
 
@@ -385,9 +655,12 @@ function showView(name){
   document.querySelectorAll('.view').forEach(v=>v.classList.remove('active'));
   document.querySelectorAll('nav button').forEach(b=>b.classList.remove('on'));
   document.getElementById('view-'+name).classList.add('active');
-  document.getElementById('tab-'+name).classList.add('on');
+  const tabBtn = document.getElementById('tab-'+name);
+  if(tabBtn) tabBtn.classList.add('on');   // 메모 편집 화면처럼 탭이 없는 뷰도 있다
   if(name==='review') renderReview();
   if(name==='archive') renderArchive();
+  if(name==='memo') renderMemoView();
+  document.getElementById('memo-fab').style.display = (name==='memo') ? '' : 'none';
 }
 function toast(msg){
   const t = document.getElementById('toast');
@@ -965,6 +1238,7 @@ function openItemMenu(id){
       <select id="edit-folder">${folders.map(f=>`<option ${f===it.folder?'selected':''}>${esc(f)}</option>`).join('')}</select></div>
     <button class="btn btn-primary" onclick="applyItemEdit(${id})">적용</button>
     ${it.file ? `<button class="btn btn-outline" onclick="downloadItem(${id})">📥 파일 다시 다운로드</button>` : ''}
+    <button class="btn btn-outline" onclick="itemToMemo(${id})">📝 이 링크로 메모 쓰기</button>
     <button class="menu-item red" style="border:none;text-align:center;margin-top:6px" onclick="deleteItem(${id})">🗑️ 이 링크 삭제</button>`;
   document.getElementById('item-modal').classList.add('on');
 }
@@ -1035,6 +1309,326 @@ ${list}
     loading.classList.remove('on');
   }
 }
+/* ============================================================
+   4. 메모 (원클립 통합)
+   - 저장 구조는 링크와 동일하게 localStorage + Gist 동기화를 탄다
+   - 본문을 고칠 때마다 자동 태그·할 일이 다시 계산된다
+   ============================================================ */
+let memoView = 'all';        // all | pinned | archived | trash | tag
+let memoTag = null;
+let curMemoId = null;
+let memoSaveTimer = null;
+let memoTypingAt = 0;        // 마지막 타자 시각 — 입력 중 자동 동기화가 덮어쓰지 않도록
+
+function curMemo(){ return memos.find(m=>m.id===curMemoId) || null; }
+function memoTitleOf(m){
+  if((m.title||'').trim()) return m.title.trim();
+  const first = (m.body||'').split('\n').find(l=>l.trim());
+  return first ? first.trim().slice(0,40) : '(제목 없음)';
+}
+function memoDate(ts){
+  const d = new Date(ts), now = new Date();
+  return d.toDateString() === now.toDateString()
+    ? d.toLocaleTimeString('ko-KR',{hour:'2-digit',minute:'2-digit'})
+    : d.toLocaleDateString('ko-KR',{month:'numeric',day:'numeric'});
+}
+
+function renderMemoView(){ renderMemoStats(); renderMemoFilter(); renderMemoList(); }
+
+function renderMemoStats(){
+  const s = OneClip.computeStats(memos);
+  document.getElementById('memo-stats').innerHTML =
+    '<div><b>' + s.memoCount + '</b><span>메모</span></div>' +
+    '<div><b>' + s.wordCount.toLocaleString() + '</b><span>단어</span></div>' +
+    '<div><b>' + s.tagCount + '</b><span>태그</span></div>' +
+    '<div><b>' + s.todoDoneCount + '</b><span>끝낸 할일</span></div>';
+}
+
+function renderMemoFilter(){
+  const live = memos.filter(m=>!m.deleted && !m.archived);
+  const tagCount = new Map();
+  live.forEach(m=>[...m.tags, ...m.autoTags].forEach(t=>tagCount.set(t,(tagCount.get(t)||0)+1)));
+  const tags = [...tagCount.entries()].sort((a,b)=>b[1]-a[1]).slice(0,12);
+  const base = [
+    ['all', '전체 ' + live.length],
+    ['pinned', '📌 고정 ' + live.filter(m=>m.pinned).length],
+    ['archived', '📥 보관 ' + memos.filter(m=>!m.deleted && m.archived).length],
+    ['trash', '🗑️ 휴지통 ' + memos.filter(m=>m.deleted).length]
+  ];
+  let html = base.map(b=>
+    '<button class="chip ' + (memoView===b[0]&&!memoTag?'on':'') + '" onclick="setMemoView(\'' + b[0] + '\')">' + esc(b[1]) + '</button>').join('');
+  html += tags.map(t=>
+    '<button class="chip ' + (memoView==='tag'&&memoTag===t[0]?'on':'') + '" onclick="setMemoView(\'tag\', this.dataset.t)" data-t="' + esc(t[0]) + '">#' + esc(t[0]) + ' ' + t[1] + '</button>').join('');
+  document.getElementById('memo-filter').innerHTML = html;
+}
+function setMemoView(v, tag){ memoView = v; memoTag = tag || null; renderMemoView(); }
+
+function renderMemoList(){
+  const q = document.getElementById('memo-search').value;
+  let list = OneClip.filterMemos(memos, memoView, memoTag);
+  list = OneClip.searchMemos(list, q);
+  const el = document.getElementById('memo-list');
+  if(!list.length){
+    el.innerHTML = '<div class="empty"><span class="big">📝</span>' +
+      (q ? '검색 결과가 없어요' : '아직 메모가 없어요<br>오른쪽 아래 ✚ 를 눌러 시작하세요') + '</div>';
+    return;
+  }
+  el.innerHTML = list.map(m=>{
+    const tags = [...m.tags.map(t=>'<span class="tagpill">#' + esc(t) + '</span>'),
+                  ...m.autoTags.filter(t=>!m.tags.includes(t)).map(t=>'<span class="tagpill auto">#' + esc(t) + '</span>')]
+                  .slice(0,4).join('');
+    const todoLeft = m.todos.filter(t=>!t.done).length;
+    return '<div class="memo-card" onclick="openMemo(\'' + m.id + '\')">' +
+      '<div class="memo-card-head">' +
+        '<div class="memo-card-title">' + (m.pinned?'📌 ':'') + esc(memoTitleOf(m)) + '</div>' +
+        '<span class="archive-date">' + memoDate(m.updatedAt) + '</span>' +
+      '</div>' +
+      (m.body.trim() ? '<div class="memo-card-body">' + esc(m.body.trim()) + '</div>' : '') +
+      '<div class="memo-card-meta">' + tags +
+        (todoLeft ? '<span class="tagpill" style="background:#FEF3C7;color:#B45309">☑ 할일 ' + todoLeft + '</span>' : '') +
+      '</div></div>';
+  }).join('');
+}
+
+/* ---------- 편집 화면 ---------- */
+function createMemo(){
+  const m = OneClip.newMemo();
+  memos.unshift(m);
+  persistAll();
+  openMemo(m.id);
+}
+function openMemo(id){
+  curMemoId = id;
+  showView('memoedit');
+  document.getElementById('tab-memo').classList.add('on');   // 편집 중에도 메모 탭을 켜둔다
+  renderMemoEditor();
+  const m = curMemo();
+  if(m && !m.title && !m.body) document.getElementById('memo-title').focus();
+}
+function closeMemoEditor(){
+  saveMemoEdits();
+  const m = curMemo();
+  // 아무것도 안 쓴 빈 메모는 남기지 않는다
+  if(m && !m.title.trim() && !m.body.trim() && !m.tags.length){
+    memos = memos.filter(x=>x.id!==m.id);
+    persistAll();
+  }
+  curMemoId = null;
+  showView('memo');
+}
+function renderMemoEditor(){
+  const m = curMemo();
+  if(!m){ showView('memo'); return; }
+  document.getElementById('memo-title').value = m.title;
+  document.getElementById('memo-body').value = m.body;
+  document.getElementById('memo-pin-btn').classList.toggle('on', !!m.pinned);
+  document.getElementById('memo-arch-btn').classList.toggle('on', !!m.archived);
+  renderMemoTags();
+  renderMemoPanels();
+  document.getElementById('memo-savemark').textContent =
+    m.deleted ? '🗑️ 휴지통에 있는 메모' : '저장됨 · ' + memoDate(m.updatedAt);
+}
+function renderMemoTags(){
+  const m = curMemo(); if(!m) return;
+  document.getElementById('memo-tags').innerHTML =
+    m.tags.map(t=>'<span class="tagpill x" data-t="' + esc(t) + '" onclick="removeMemoTag(this.dataset.t)">#' + esc(t) + ' ✕</span>').join('') +
+    m.autoTags.filter(t=>!m.tags.includes(t)).map(t=>'<span class="tagpill auto">#' + esc(t) + '</span>').join('');
+}
+function renderMemoPanels(){
+  const m = curMemo(); if(!m) return;
+  const sp = document.getElementById('memo-summary-panel');
+  if(m.summary && m.summary.length){
+    sp.style.display = '';
+    sp.innerHTML = '<h3>📌 요약</h3><ul>' + m.summary.map(s=>'<li>' + esc(s) + '</li>').join('') + '</ul>';
+  }else sp.style.display = 'none';
+
+  const tp = document.getElementById('memo-todo-panel');
+  if(m.todos && m.todos.length){
+    tp.style.display = '';
+    tp.innerHTML = '<h3>☑ 할 일</h3>' + m.todos.map((t,i)=>
+      '<div class="todo-row ' + (t.done?'done':'') + '">' +
+        '<input type="checkbox" ' + (t.done?'checked':'') + ' onchange="toggleTodo(' + i + ', this.checked)">' +
+        '<label>' + esc(t.text) + '</label>' +
+        '<button onclick="removeTodo(' + i + ')">✕</button>' +
+      '</div>').join('');
+  }else tp.style.display = 'none';
+}
+function onMemoInput(){
+  memoTypingAt = Date.now();
+  document.getElementById('memo-savemark').textContent = '입력 중…';
+  clearTimeout(memoSaveTimer);
+  memoSaveTimer = setTimeout(()=>{ saveMemoEdits(); renderMemoTags(); renderMemoPanels(); }, 700);
+}
+// 편집 내용을 메모 객체에 반영 (자동 태그·할 일 재계산 포함)
+function saveMemoEdits(){
+  clearTimeout(memoSaveTimer);
+  const m = curMemo(); if(!m) return;
+  if(!document.getElementById('view-memoedit').classList.contains('active')) return;
+  const nt = document.getElementById('memo-title').value;
+  const nb = document.getElementById('memo-body').value;
+  if(nt === m.title && nb === m.body) return;
+  m.title = nt; m.body = nb;
+  m.autoTags = OneClip.extractKeywords(nt + '\n' + nb);
+  const doneMap = new Map(m.todos.map(t=>[t.text, t.done]));
+  m.todos = OneClip.extractTodos(nb).map(text=>({ text, done: doneMap.get(text) || false }));
+  m.updatedAt = Date.now();
+  persistAll();
+  document.getElementById('memo-savemark').textContent = '저장됨 · ' + memoDate(m.updatedAt);
+}
+function touchMemo(m){ m.updatedAt = Date.now(); persistAll(); }
+function toggleMemoFlag(flag){
+  const m = curMemo(); if(!m) return;
+  m[flag] = !m[flag];
+  touchMemo(m); renderMemoEditor();
+  toast(flag==='pinned' ? (m.pinned?'📌 고정했어요':'고정을 풀었어요')
+                        : (m.archived?'📥 보관함으로 옮겼어요':'보관을 풀었어요'));
+}
+function toggleTodo(i, done){
+  const m = curMemo(); if(!m || !m.todos[i]) return;
+  m.todos[i].done = done; touchMemo(m); renderMemoPanels();
+}
+function removeTodo(i){
+  const m = curMemo(); if(!m) return;
+  m.todos.splice(i,1); touchMemo(m); renderMemoPanels();
+}
+function onTagKey(e){ if(e.key === 'Enter'){ e.preventDefault(); addMemoTag(); } }
+function addMemoTag(){
+  const m = curMemo(); if(!m) return;
+  const el = document.getElementById('memo-tag-input');
+  const t = el.value.trim().replace(/^#/,'');
+  if(!t) return;
+  if(!m.tags.includes(t)) m.tags.push(t);
+  el.value = '';
+  touchMemo(m); renderMemoTags();
+}
+function removeMemoTag(t){
+  const m = curMemo(); if(!m) return;
+  m.tags = m.tags.filter(x=>x!==t);
+  touchMemo(m); renderMemoTags();
+}
+function openMemoMenu(){
+  const m = curMemo(); if(!m) return;
+  document.getElementById('item-modal-body').innerHTML =
+    '<h2>📝 메모 <button onclick="closeModal(\'item-modal\')">✕</button></h2>' +
+    '<button class="menu-item" onclick="copyMemoText()">📋 본문 복사</button>' +
+    '<button class="menu-item" onclick="duplicateMemo()">🧬 복제</button>' +
+    (m.deleted
+      ? '<button class="menu-item" onclick="restoreMemo()">↩️ 휴지통에서 되살리기</button>' +
+        '<button class="menu-item red" onclick="purgeMemo()">🗑️ 완전히 삭제 (모든 기기에서)</button>'
+      : '<button class="menu-item red" onclick="trashMemo()">🗑️ 휴지통으로</button>');
+  document.getElementById('item-modal').classList.add('on');
+}
+function copyMemoText(){
+  const m = curMemo(); if(!m) return;
+  const text = (m.title ? m.title + '\n\n' : '') + m.body;
+  navigator.clipboard.writeText(text).then(()=>toast('복사했어요'), ()=>toast('복사에 실패했어요'));
+  closeModal('item-modal');
+}
+function duplicateMemo(){
+  const m = curMemo(); if(!m) return;
+  const c = OneClip.newMemo();
+  Object.assign(c, { title: memoTitleOf(m) + ' (사본)', body: m.body, tags:[...m.tags], autoTags:[...m.autoTags],
+                     todos: m.todos.map(t=>({ text:t.text, done:t.done })), summary:[...(m.summary||[])] });
+  memos.unshift(c); persistAll();
+  closeModal('item-modal'); openMemo(c.id); toast('복제했어요');
+}
+function trashMemo(){
+  const m = curMemo(); if(!m) return;
+  saveMemoEdits();
+  m.deleted = true; touchMemo(m);
+  closeModal('item-modal'); curMemoId = null; showView('memo');
+  toast('휴지통으로 보냈어요');
+}
+function restoreMemo(){
+  const m = curMemo(); if(!m) return;
+  m.deleted = false; touchMemo(m);
+  closeModal('item-modal'); renderMemoEditor(); toast('되살렸어요');
+}
+function purgeMemo(){
+  const m = curMemo(); if(!m) return;
+  if(!confirm('이 메모를 완전히 지울까요?\n동기화된 다른 기기에서도 사라집니다.')) return;
+  tombs.memos.push({ id: m.id, at: Date.now() });   // 다른 기기에도 삭제 전파
+  memos = memos.filter(x=>x.id!==m.id);
+  persistAll();
+  closeModal('item-modal'); curMemoId = null; showView('memo');
+  toast('완전히 삭제했어요');
+}
+
+/* AI 요약(설정한 AI 서비스) 또는 기기 안에서 계산하는 TextRank 요약 */
+async function analyzeMemo(useAI){
+  saveMemoEdits();
+  const m = curMemo(); if(!m) return;
+  if(!m.body.trim()){ toast('먼저 내용을 입력해 주세요'); return; }
+
+  if(!useAI){
+    const s = OneClip.summarize(m.body, 3);
+    if(!s.length){ toast('요약할 만큼 문장이 길지 않아요'); return; }
+    m.summary = s;
+    touchMemo(m); renderMemoPanels(); toast('⚡ 요약했어요 (기기 안에서 계산)');
+    return;
+  }
+  if(!settings.apiKey){ toast('설정에서 AI API 키를 먼저 넣어주세요'); openSettings(); return; }
+  const overlay = document.getElementById('loading');
+  document.getElementById('loading-text').textContent = 'AI가 메모를 정리하고 있어요…';
+  overlay.classList.add('on');
+  try{
+    const raw = await callLLM(OneClip.buildClaudePrompt(m.body));
+    const r = OneClip.parseClaudeJSON(raw);
+    if(!r) throw new Error('응답을 이해하지 못했어요');
+    m.summary = r.summary;
+    r.topics.forEach(t=>{ if(!m.tags.includes(t)) m.tags.push(t); });
+    const doneMap = new Map(m.todos.map(t=>[t.text, t.done]));
+    const merged = [...new Set([...r.todos, ...OneClip.extractTodos(m.body)])];
+    m.todos = merged.map(text=>({ text, done: doneMap.get(text) || false }));
+    touchMemo(m); renderMemoEditor();
+    toast('✨ AI 정리 완료!');
+  }catch(err){
+    console.error(err);
+    m.summary = OneClip.summarize(m.body, 3);   // 실패해도 빈손으로 돌려보내지 않는다
+    touchMemo(m); renderMemoPanels();
+    toast('AI 실패 — 기기 안 요약으로 대신했어요: ' + err.message);
+  }finally{
+    overlay.classList.remove('on');
+  }
+}
+
+/* 보관함 링크를 메모로 열기 (제목·주소·폴더를 채운 새 메모) */
+function itemToMemo(id){
+  const it = items.find(x=>x.id===id); if(!it) return;
+  const m = OneClip.newMemo();
+  m.title = it.title;
+  m.body = it.url + '\n\n';
+  m.tags = it.folder ? [it.folder] : [];
+  memos.unshift(m);
+  persistAll();
+  closeModal('item-modal');
+  openMemo(m.id);
+  document.getElementById('memo-body').focus();
+  toast('이 링크로 메모를 만들었어요');
+}
+
+/* 메모 본문 속 링크를 검토 화면으로 넘긴다 (링크보관함 쪽과 연결) */
+function memoLinksToArchive(){
+  saveMemoEdits();
+  const m = curMemo(); if(!m) return;
+  const links = extractLinks(m.body);
+  if(!links.length){ toast('메모 안에 주소가 없어요'); return; }
+  const known = new Set(items.map(it=>it.url));
+  const fresh = links.filter(l=>!known.has(l.url) && !pending.some(p=>p.url===l.url));
+  if(!fresh.length){ toast('이미 보관함에 들어 있는 링크예요'); return; }
+  const base = Date.now();   // 검토 화면은 숫자 id를 쓴다 (링크 추출과 같은 방식)
+  fresh.forEach((l, i)=>{
+    const info = fileInfo(l.url) || {};
+    pending.push({ id: base + i, url: l.url, context: l.context,
+                   title: fallbackTitle(l),
+                   folder: classifyByKeyword((l.before && l.before.trim().length >= 8) ? l.before : l.context),
+                   memo: '', file: info.direct || '', fileKind: info.kind || '' });
+  });
+  updateBadge();
+  showView('review');
+  toast('링크 ' + fresh.length + '개를 검토 화면으로 보냈어요');
+}
+
 /* ============================================================
    폴더 관리 (추가 / 이름변경 / 삭제)
    ============================================================ */
@@ -1181,7 +1775,7 @@ function exportData(){
     '[확인] 넣기 — 나중에 이 파일 하나로 전부 복구됩니다\n' +
     '[취소] 링크만 넣기\n\n' +
     '※ 넣을 경우 파일에 비밀 값이 들어가니 남에게 주지 마세요.');
-  const payload = { items, folders, tombs, savedAt: new Date().toISOString() };
+  const payload = { items, folders, memos, tombs, savedAt: new Date().toISOString() };
   if(withKeys){
     payload.settings = {
       ghToken: settings.ghToken || '', gistId: settings.gistId || '',
@@ -1208,6 +1802,16 @@ function importData(e){
       let added = 0;
       for(const it of data.items){ if(!existing.has(it.url)){ items.push(it); added++; } }
       for(const f of (data.folders||[])){ if(!folders.includes(f)) folders.push(f); }
+      // 메모 병합 — 같은 id는 더 최근에 고친 쪽을 남긴다
+      let addedMemo = 0;
+      const byId = new Map(memos.map(m=>[m.id, m]));
+      for(const raw of (data.memos||[])){
+        const m = normalizeMemo(raw); if(!m) continue;
+        const p = byId.get(m.id);
+        if(!p){ byId.set(m.id, m); addedMemo++; }
+        else if((m.updatedAt||0) > (p.updatedAt||0)) byId.set(m.id, m);
+      }
+      memos = [...byId.values()].sort((a,b)=>(b.updatedAt||0)-(a.updatedAt||0));
       // 백업에 토큰이 들어 있으면 복구할지 물어본다
       let restored = false;
       if(data.settings && (data.settings.ghToken || data.settings.apiKey)){
@@ -1218,8 +1822,8 @@ function importData(e){
           restored = true;
         }
       }
-      persistAll(); renderArchive();
-      toast(`가져오기 완료 (새 링크 ${added}개)` + (restored ? ' · 토큰 복구됨' : ''));
+      persistAll(); renderArchive(); renderMemoView();
+      toast(`가져오기 완료 (새 링크 ${added}개 · 새 메모 ${addedMemo}개)` + (restored ? ' · 토큰 복구됨' : ''));
       if(restored) syncNow(true);
     }catch(err){ toast('백업 파일을 읽지 못했어요'); }
   };
@@ -1369,12 +1973,14 @@ function newerOf(a, b){
 // 두 데이터 묶음 병합 (b쪽 폴더 순서 우선 — 로컬을 b로 넘긴다)
 function mergeSets(a, b){
   const A = a || {}, B = b || {};
-  const at = A.tombs || { items:[], folders:[] }, bt = B.tombs || { items:[], folders:[] };
-  // 삭제 기록 병합 (URL/폴더명별 최신 것만 유지)
+  const at = A.tombs || { items:[], folders:[], memos:[] }, bt = B.tombs || { items:[], folders:[], memos:[] };
+  // 삭제 기록 병합 (URL/폴더명/메모 id별 최신 것만 유지)
   const tItem = new Map();
   [...(at.items||[]), ...(bt.items||[])].forEach(t => { const p = tItem.get(t.url); if(!p || t.at > p.at) tItem.set(t.url, t); });
   const tFold = new Map();
   [...(at.folders||[]), ...(bt.folders||[])].forEach(t => { const p = tFold.get(t.name); if(!p || t.at > p.at) tFold.set(t.name, t); });
+  const tMemo = new Map();
+  [...(at.memos||[]), ...(bt.memos||[])].forEach(t => { const p = tMemo.get(t.id); if(!p || t.at > p.at) tMemo.set(t.id, t); });
   // 링크 병합: URL별로 더 최근에 수정된 쪽이 이김
   const byUrl = new Map();
   [...(A.items||[]), ...(B.items||[])].forEach(it => { const p = byUrl.get(it.url); byUrl.set(it.url, p ? newerOf(it, p) : it); });
@@ -1383,6 +1989,17 @@ function mergeSets(a, b){
     const it = byUrl.get(url);
     if(it && (it.updatedAt || it.createdAt || '') <= t.at) byUrl.delete(url);
   }
+  // 메모 병합: id별로 updatedAt(숫자)이 더 큰 쪽이 이김 — 링크와 같은 규칙
+  const byId = new Map();
+  [...(A.memos||[]), ...(B.memos||[])].forEach(m => {
+    const mm = normalizeMemo(m); if(!mm) return;
+    const p = byId.get(mm.id);
+    byId.set(mm.id, (!p || (mm.updatedAt||0) >= (p.updatedAt||0)) ? mm : p);
+  });
+  for(const [id, t] of tMemo){
+    const m = byId.get(id);
+    if(m && (m.updatedAt || m.createdAt || 0) <= t.at) byId.delete(id);
+  }
   // 폴더 병합: b 순서 우선 + a에만 있는 폴더 뒤에 추가, 삭제된 폴더 제외
   const fold = [...(B.folders||[])];
   (A.folders||[]).forEach(f => { if(!fold.includes(f)) fold.push(f); });
@@ -1390,14 +2007,34 @@ function mergeSets(a, b){
   return {
     items: [...byUrl.values()].sort((a2,b2) => (b2.createdAt||'').localeCompare(a2.createdAt||'')),
     folders: foldFinal.length ? foldFinal : DEFAULT_FOLDERS.slice(),
-    tombs: { items:[...tItem.values()].slice(-500), folders:[...tFold.values()].slice(-100) }
+    memos: [...byId.values()].sort((a2,b2) => (b2.updatedAt||0) - (a2.updatedAt||0)),
+    tombs: { items:[...tItem.values()].slice(-500), folders:[...tFold.values()].slice(-100), memos:[...tMemo.values()].slice(-300) }
+  };
+}
+// 다른 기기(또는 예전 버전)에서 온 메모에 빠진 칸이 있어도 앱이 깨지지 않게 채워 준다
+function normalizeMemo(m){
+  if(!m || !m.id) return null;
+  const t = Number(m.updatedAt) || Number(m.createdAt) || Date.now();
+  return {
+    id: String(m.id),
+    title: String(m.title || ''),
+    body: String(m.body || ''),
+    tags: Array.isArray(m.tags) ? m.tags.map(String) : [],
+    autoTags: Array.isArray(m.autoTags) ? m.autoTags.map(String) : [],
+    todos: Array.isArray(m.todos) ? m.todos.filter(x=>x && x.text).map(x=>({ text:String(x.text), done: !!x.done })) : [],
+    summary: Array.isArray(m.summary) ? m.summary.map(String) : [],
+    pinned: !!m.pinned, archived: !!m.archived, deleted: !!m.deleted,
+    createdAt: Number(m.createdAt) || t,
+    updatedAt: t
   };
 }
 // 원격 데이터와 현재 로컬 데이터 병합
-function mergeData(remote){ return mergeSets(remote, { items, folders, tombs }); }
+function mergeData(remote){ return mergeSets(remote, { items, folders, memos, tombs }); }
 
 async function syncNow(manual){
   if(!settings.ghToken || syncing) return;
+  saveMemoEdits();                       // 쓰던 메모를 먼저 반영해야 병합에서 밀리지 않는다
+  if(!manual && Date.now() - memoTypingAt < 4000){ scheduleSync(); return; }  // 타자 치는 중에는 미룬다
   if(!navigator.onLine){ setCloudIcon('⚠️'); if(manual) toast('오프라인이에요 — 인터넷 연결 후 다시 시도하세요'); return; }
   syncing = true; setCloudIcon('⏳');
   try{
@@ -1423,11 +2060,11 @@ async function syncNow(manual){
       }
     }
     const merged = mergeData(remote);
-    items = merged.items; folders = merged.folders; tombs = merged.tombs;
+    items = merged.items; folders = merged.folders; tombs = merged.tombs; memos = merged.memos;
     // 로컬 저장 (persistAll을 쓰면 동기화가 또 예약되므로 직접 저장)
-    save(LS.items, items); save(LS.folders, folders); save(LS.tombs, tombs);
+    save(LS.items, items); save(LS.folders, folders); save(LS.tombs, tombs); save(LS.memos, memos);
     // 병합 결과 업로드
-    const payload = JSON.stringify({ items, folders, tombs, updatedAt: new Date().toISOString() });
+    const payload = JSON.stringify({ items, folders, memos, tombs, updatedAt: new Date().toISOString() });
     if(gistId){
       await ghApi('/gists/' + gistId, { method:'PATCH', body: JSON.stringify({ files: { [GIST_FILE]: { content: payload } } }) });
     }else{
@@ -1446,8 +2083,10 @@ async function syncNow(manual){
     save(LS.settings, settings);
     // 화면 갱신
     if(document.getElementById('view-archive').classList.contains('active')) renderArchive();
+    if(document.getElementById('view-memo').classList.contains('active')) renderMemoView();
+    if(document.getElementById('view-memoedit').classList.contains('active') && curMemo()) renderMemoEditor();
     setCloudIcon('☁️');
-    if(manual) toast('☁️ 동기화 완료! 링크 ' + items.length + '개');
+    if(manual) toast('☁️ 동기화 완료! 링크 ' + items.length + '개 · 메모 ' + memos.filter(m=>!m.deleted).length + '개');
   }catch(err){
     console.error(err);
     settings.syncError = err.message;
@@ -1524,7 +2163,7 @@ function renderSyncStatus(){
   el.innerHTML = (settings.syncError
       ? '🔴 <b>동기화 안 됨</b> — ' + esc(settings.syncError)
       : '🟢 정상 작동 중' + (settings.ghLogin ? ' (' + esc(settings.ghLogin) + ')' : ''))
-    + '<br>마지막 동기화: ' + esc(last) + ' · 이 기기의 링크 ' + items.length + '개'
+    + '<br>마지막 동기화: ' + esc(last) + ' · 이 기기의 링크 ' + items.length + '개 · 메모 ' + memos.filter(m=>!m.deleted).length + '개'
     + '<br>저장된 토큰: ' + esc(fp);
 }
 
@@ -1536,7 +2175,7 @@ function renderSyncStatus(){
    오래된 서비스워커가 남아 있으면 GitHub 통신이 막히는 문제가 있었다.
    그래서 버전을 확인해 다르면 한 번만 자동으로 완전 새로고침한다.
    ============================================================ */
-const SW_EXPECTED = 'linkarchive-v15';
+const SW_EXPECTED = 'linkarchive-v16';
 
 // 실행 중인 서비스워커의 버전을 물어본다
 async function swVersion(){
@@ -1614,7 +2253,157 @@ ensurePersistentStorage();
 updateBadge();
 setCloudIcon('☁️');
 if(settings.ghToken) syncNow(false); // 앱을 열면 다른 기기의 변경 사항을 가져온다
+
+/* ============================================================
+   자동 가져오기 — 다른 기기의 변경을 빨리 받아온다
+   업로드는 변경 3초 뒤(scheduleSync), 내려받기는 아래 네 가지 순간에.
+   ============================================================ */
+let lastPullAt = 0;
+function autoPull(){
+  if(!settings.ghToken || syncing) return;
+  if(Date.now() - lastPullAt < 8000) return;      // 너무 잦은 호출은 건너뛴다 (GitHub 사용량 절약)
+  lastPullAt = Date.now();
+  syncNow(false);
+}
+document.addEventListener('visibilitychange', ()=>{ if(!document.hidden) autoPull(); }); // 앱으로 돌아올 때
+window.addEventListener('focus', autoPull);                                              // 창을 다시 클릭할 때
+window.addEventListener('online', ()=>{ setCloudIcon('☁️'); autoPull(); });              // 인터넷 복구될 때
+setInterval(()=>{ if(!document.hidden && navigator.onLine) autoPull(); }, 45000);         // 보고 있는 동안 45초마다
 initServiceWorker();
 </script>
+<script>window.__OT_CFG__={app:"링크보관함 — DM 링크 자동 정리",author:"OK",version:"1.0",build:"__BUILD_CODE__",corner:"top-right",back:"auto",dim:0};</script>
+<script>
+/* ══════════════════════════════════════════════════════════════
+   OT 앱 공용 모듈 — 제작자 표시 · 정보 화면 · 뒤로가기
+   Copyright (c) 2026 OK. All rights reserved.
+   앱마다 아래 CFG 값만 다르게 주입됩니다.
+   ══════════════════════════════════════════════════════════════ */
+(function(){
+  "use strict";
+  if (window.__OT_CREDIT__) return;          // 중복 주입 방지
+  window.__OT_CREDIT__ = true;
+
+  var CFG = window.__OT_CFG__ || {};
+  var C = {
+    app:    CFG.app    || document.title || "앱",
+    author: CFG.author || "OK",
+    affil:  CFG.affil  || "",
+    contact:CFG.contact|| "",
+    version:CFG.version|| "1.0",
+    build:  (CFG.build && CFG.build.slice(0,2) !== "__") ? CFG.build : "로컬 사용본",
+    year:   CFG.year   || "2026",
+    corner: CFG.corner || "bottom-right",    // 버튼 위치
+    back:   CFG.back   || "none",            // "auto" | "none"
+    dim:    !!CFG.dim,                       // 반투명 여부 (CVI 놀이화면)
+    terms:  CFG.terms  ||
+      "이 프로그램의 저작권은 제작자에게 있습니다.\n" +
+      "치료·교육 목적의 사용은 자유롭게 하실 수 있습니다.\n" +
+      "제작자의 동의 없는 재배포·수정·상업적 이용을 금합니다."
+  };
+
+  /* ── 스타일 (otk- 접두사로 앱 CSS와 충돌 방지) ── */
+  var pos = {
+    "bottom-right":"bottom:14px; right:14px;",
+    "bottom-left" :"bottom:14px; left:14px;",
+    "top-right"   :"top:14px; right:14px;",
+    "top-left"    :"top:14px; left:14px;"
+  }[C.corner] || "bottom:14px; right:14px;";
+
+  var css = document.createElement("style");
+  css.textContent =
+  '.otk-bar{position:fixed;'+pos+'z-index:2147483000;display:flex;gap:8px;'+
+    'opacity:'+(C.dim?'0.18':'0.75')+';transition:opacity .2s;}'+
+  '.otk-bar:hover,.otk-bar.otk-lit{opacity:1;}'+
+  '.otk-btn{width:44px;height:44px;border-radius:50%;border:2px solid rgba(255,255,255,.45);'+
+    'background:rgba(0,0,0,.55);color:#fff;font:900 18px/1 system-ui,sans-serif;'+
+    'display:flex;align-items:center;justify-content:center;cursor:pointer;'+
+    '-webkit-tap-highlight-color:transparent;padding:0;}'+
+  '.otk-btn:active{background:rgba(255,255,0,.28);border-color:#FF0;color:#FF0;}'+
+  '.otk-ov{position:fixed;inset:0;z-index:2147483001;background:#000;color:#fff;'+
+    'display:none;overflow:auto;padding:5vh 6vw 6vh;'+
+    'font-family:"Malgun Gothic","맑은 고딕",system-ui,sans-serif;}'+
+  '.otk-ov.otk-on{display:block;}'+
+  '.otk-w{max-width:640px;margin:0 auto;}'+
+  '.otk-w h2{color:#FF0;font-size:clamp(20px,5vw,30px);font-weight:900;'+
+    'margin:0 0 3vh;text-align:center;}'+
+  '.otk-r{display:flex;gap:14px;padding:13px 0;border-bottom:1px solid #222;'+
+    'font-size:clamp(13px,3.4vw,17px);line-height:1.5;}'+
+  '.otk-k{color:#888;font-weight:800;flex:0 0 34%;}'+
+  '.otk-v{color:#fff;font-weight:800;flex:1;word-break:break-all;}'+
+  '.otk-t{margin-top:3vh;padding:16px 18px;border:2px solid #333;border-radius:12px;'+
+    'color:#bbb;font-size:clamp(12px,3vw,15px);font-weight:700;line-height:1.7;white-space:pre-line;}'+
+  '.otk-c{margin-top:2vh;color:#666;text-align:center;'+
+    'font-size:clamp(11px,2.7vw,14px);font-weight:700;}'+
+  '.otk-x{display:block;width:100%;margin-top:4vh;padding:18px;border:0;border-radius:14px;'+
+    'background:#222;color:#fff;font:900 clamp(16px,4vw,22px)/1 inherit;cursor:pointer;}';
+  document.head.appendChild(css);
+
+  /* ── 정보 화면 ── */
+  var rows = [["앱 이름",C.app],["제작자",C.author],["소속",C.affil],
+              ["연락처",C.contact],["버전",C.version],["배포본 번호",C.build]]
+             .filter(function(r){return r[1];});
+  var ov = document.createElement("div");
+  ov.className = "otk-ov";
+  ov.innerHTML =
+    '<div class="otk-w"><h2>앱 정보</h2>' +
+    rows.map(function(r){
+      return '<div class="otk-r"><span class="otk-k">'+r[0]+
+             '</span><span class="otk-v">'+r[1]+'</span></div>';}).join("") +
+    '<div class="otk-t"></div><div class="otk-c"></div>' +
+    '<button class="otk-x" type="button">닫기</button></div>';
+  ov.querySelector(".otk-t").textContent = C.terms;
+  ov.querySelector(".otk-c").textContent =
+    "\u00A9 " + C.year + " " + C.author + ". All rights reserved.";
+
+  /* ── 버튼 ── */
+  var bar = document.createElement("div");
+  bar.className = "otk-bar";
+
+  var inIframe = (function(){ try{ return window.self !== window.top; }catch(e){ return true; } })();
+
+  if (C.back === "auto") {
+    var b = document.createElement("button");
+    b.type = "button"; b.className = "otk-btn"; b.setAttribute("aria-label","뒤로");
+    b.textContent = "\u2039";                 // ‹
+    b.addEventListener("click", function(ev){
+      ev.preventDefault(); ev.stopPropagation();
+      /* 런처 안이면 런처 홈으로, 단독 실행이면 앱 자체 첫 화면으로 */
+      if (inIframe) { try{ parent.postMessage({__ot:"home"},"*"); }catch(e){} return; }
+      if (typeof window.__OT_BACK__ === "function") { window.__OT_BACK__(); return; }
+      if (history.length > 1) history.back();
+    });
+    bar.appendChild(b);
+  }
+
+  var i = document.createElement("button");
+  i.type = "button"; i.className = "otk-btn"; i.setAttribute("aria-label","앱 정보");
+  i.textContent = "i";
+  i.addEventListener("click", function(ev){
+    ev.preventDefault(); ev.stopPropagation();
+    ov.classList.add("otk-on");
+  });
+  bar.appendChild(i);
+
+  ov.querySelector(".otk-x").addEventListener("click", function(ev){
+    ev.preventDefault(); ev.stopPropagation();
+    ov.classList.remove("otk-on");
+  });
+
+  function mount(){
+    document.body.appendChild(bar);
+    document.body.appendChild(ov);
+  }
+  if (document.body) mount();
+  else document.addEventListener("DOMContentLoaded", mount);
+
+  /* 반투명 모드에서 한 번 만지면 잠시 또렷해짐 */
+  if (C.dim) {
+    bar.addEventListener("pointerenter", function(){ bar.classList.add("otk-lit"); });
+    bar.addEventListener("pointerdown",  function(){ bar.classList.add("otk-lit");
+      setTimeout(function(){ bar.classList.remove("otk-lit"); }, 2500); });
+  }
+})();
+</script>
+<script>window.__OT_BACK__=function(){if(history.length>1)history.back();};</script>
 </body>
 </html>
