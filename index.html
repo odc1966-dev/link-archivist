@@ -297,6 +297,18 @@ nav button.on{color:var(--primary)}
 .todo-row.done label{text-decoration:line-through;color:var(--text-sub)}
 .todo-row button{background:none;border:none;color:var(--text-sub);cursor:pointer;font-size:.95rem;padding:0 2px}
 .save-mark{font-size:.72rem;color:var(--text-sub);white-space:nowrap}
+
+/* ---------- 제작자 표시 버튼(공용 모듈) 자리 조정 ----------
+   기본값은 오른쪽 위인데 헤더의 ⚙️ 설정 버튼과 겹쳐서
+   설정 대신 정보 화면이 열리는 일이 있었다. 하단 탭 위 왼쪽으로 내린다.
+   (오른쪽 아래는 메모 ✚ 버튼 자리) */
+.otk-bar{
+  top:auto !important; right:auto !important; left:12px !important;
+  bottom:calc(66px + env(safe-area-inset-bottom)) !important;
+  opacity:.4 !important;
+}
+.otk-bar:hover,.otk-bar.otk-lit{opacity:1 !important}
+.otk-btn{width:34px !important;height:34px !important;font-size:15px !important}
 </style>
 </head>
 <body>
@@ -383,6 +395,11 @@ nav button.on{color:var(--primary)}
 <div class="modal-bg" id="settings-modal">
   <div class="modal">
     <h2>⚙️ 설정 <span id="app-ver" style="font-size:.7rem;font-weight:400;color:var(--text-sub)"></span> <button onclick="closeModal('settings-modal')">✕</button></h2>
+    <div style="display:flex;gap:8px;margin-bottom:6px">
+      <button class="btn btn-outline" style="flex:1;margin-top:0" onclick="runDiagnostics()">🩺 진단</button>
+      <button class="btn btn-outline" style="flex:1;margin-top:0" onclick="hardRefresh(true)">🔄 앱 완전 새로고침</button>
+    </div>
+    <p id="diag-out" class="hint" style="text-align:left;margin:0 0 10px"></p>
     <div class="field">
       <label>AI 서비스</label>
       <select id="set-provider" onchange="onProviderChange()">
@@ -418,11 +435,6 @@ nav button.on{color:var(--primary)}
       <p id="token-check" class="hint" style="text-align:left;margin:6px 0 0"></p>
     </div>
     <button class="btn btn-outline" onclick="testSyncToken()">☁️ 동기화 연결 테스트</button>
-    <div style="display:flex;gap:8px">
-      <button class="btn btn-outline" style="flex:1" onclick="runDiagnostics()">🩺 진단</button>
-      <button class="btn btn-outline" style="flex:1" onclick="hardRefresh(true)">🔄 앱 완전 새로고침</button>
-    </div>
-    <p id="diag-out" class="hint" style="text-align:left;margin:8px 0 0"></p>
     <p class="section-title" style="margin-top:24px">앱 설치</p>
     <p id="install-status" class="hint" style="text-align:left;margin:0 0 10px"></p>
     <button class="btn btn-primary" id="install-btn" onclick="installApp()">📲 앱으로 설치하기</button>
@@ -2175,7 +2187,7 @@ function renderSyncStatus(){
    오래된 서비스워커가 남아 있으면 GitHub 통신이 막히는 문제가 있었다.
    그래서 버전을 확인해 다르면 한 번만 자동으로 완전 새로고침한다.
    ============================================================ */
-const SW_EXPECTED = 'linkarchive-v16';
+const SW_EXPECTED = 'linkarchive-v17';
 
 // 실행 중인 서비스워커의 버전을 물어본다
 async function swVersion(){
@@ -2271,7 +2283,7 @@ window.addEventListener('online', ()=>{ setCloudIcon('☁️'); autoPull(); }); 
 setInterval(()=>{ if(!document.hidden && navigator.onLine) autoPull(); }, 45000);         // 보고 있는 동안 45초마다
 initServiceWorker();
 </script>
-<script>window.__OT_CFG__={app:"링크보관함 — DM 링크 자동 정리",author:"OK",version:"1.0",build:"__BUILD_CODE__",corner:"top-right",back:"auto",dim:0};</script>
+<script>window.__OT_CFG__={app:"링크보관함 — DM 링크 자동 정리",author:"OK",version:"1.0",build:"__BUILD_CODE__",corner:"bottom-left",back:"none",dim:0};</script>
 <script>
 /* ══════════════════════════════════════════════════════════════
    OT 앱 공용 모듈 — 제작자 표시 · 정보 화면 · 뒤로가기
