@@ -453,7 +453,11 @@ nav button.on{color:var(--primary)}
     <p id="model-list" class="hint" style="text-align:left;margin:6px 0 0"></p>
     <button class="btn btn-outline" onclick="testApi()">🔌 연결 테스트</button>
     <button class="btn btn-primary" onclick="saveSettings()">저장</button>
-    <p class="section-title" style="margin-top:24px">기기 간 동기화 (GitHub)</p>
+    <p class="section-title" style="margin-top:24px">☁️ 실시간 동기화 (Google 로그인)</p>
+    <p id="fb-status" class="hint" style="text-align:left;margin:0 0 10px"></p>
+    <button class="btn btn-primary" id="fb-login-btn" onclick="fbLogin()" style="display:none">🔐 Google로 로그인하고 동기화 켜기</button>
+    <button class="btn btn-outline" id="fb-logout-btn" onclick="fbLogout()" style="display:none">로그아웃 (이 기기 동기화 끄기)</button>
+    <p class="section-title" style="margin-top:24px">예전 방식 — GitHub 동기화 (백업용)</p>
     <p id="sync-status" class="hint" style="text-align:left;margin:0 0 12px"></p>
     <div class="field">
       <label>GitHub 토큰 — <a href="https://github.com/settings/tokens/new?scopes=gist&description=%EB%A7%81%ED%81%AC%EB%B3%B4%EA%B4%80%ED%95%A8%20%EB%8F%99%EA%B8%B0%ED%99%94" target="_blank" style="color:var(--primary)">여기서 발급</a> (gist 권한만 체크, 폰·PC에 같은 토큰 입력)</label>
@@ -663,6 +667,475 @@ global.OneClip = { extractKeywords, summarize, extractTodos, searchMemos, comput
 
 <script>
 /* ============================================================
+   실시간 동기화 (Firebase: Firestore + Google 로그인)
+   - 링크·메모를 문서 하나씩 저장 → 서로 다른 항목을 동시에 고쳐도 덮어쓰지 않는다
+   - 같은 항목은 updatedAt 이 더 최근인 쪽이 이긴다 (예전 Gist 방식과 같은 규칙)
+   - 삭제는 문서에 _deleted 표시를 남겨 다른 기기로 전파한다
+   - 이 기기의 localStorage 가 항상 원본: Firebase가 안 돼도 앱은 그대로 동작한다
+   - 이 스크립트는 본 스크립트보다 먼저 읽힌다 (최상위에서는 본 스크립트 변수를 건드리지 않음)
+   ============================================================ */
+// Firebase 콘솔의 firebaseConfig (공개용 값 — 데이터 보호는 Firestore 규칙이 담당)
+const FIREBASE_CONFIG = {
+  apiKey: "AIzaSyDukEVrQXwu6h-J63cMXEV9awmC21ggGRg",
+  authDomain: "link-archivist.firebaseapp.com",
+  projectId: "link-archivist",
+  storageBucket: "link-archivist.firebasestorage.app",
+  messagingSenderId: "620245531781",
+  appId: "1:620245531781:web:9814485c2fed16e4cefdec",
+  measurementId: "G-8HDTLD10GJ"
+};
+const FB_SDK = 'https://www.gstatic.com/firebasejs/12.19.0/';
+
+/* ---------- 순수 로직 (화면·Firebase와 무관 — 테스트 대상) ---------- */
+const FBCore = (function(){
+  // 64비트 해시 — 링크 주소를 문서 id로 쓰기 위해 ('/' 같은 금지 문자를 피한다)
+  function hash64(str){
+    let h1 = 0xdeadbeef, h2 = 0x41c6ce57;
+    for(let i = 0; i < str.length; i++){
+      const ch = str.charCodeAt(i);
+      h1 = Math.imul(h1 ^ ch, 2654435761);
+      h2 = Math.imul(h2 ^ ch, 1597334677);
+    }
+    h1  = Math.imul(h1 ^ (h1 >>> 16), 2246822507);
+    h1 ^= Math.imul(h2 ^ (h2 >>> 13), 3266489909);
+    h2  = Math.imul(h2 ^ (h2 >>> 16), 2246822507);
+    h2 ^= Math.imul(h1 ^ (h1 >>> 13), 3266489909);
+    return (h2 >>> 0).toString(16).padStart(8,'0') + (h1 >>> 0).toString(16).padStart(8,'0');
+  }
+  const itemKey = url => 'u' + hash64(String(url));
+
+  // Firestore에 올릴 링크 문서 (undefined 가 섞이면 Firestore가 거부하므로 전부 채운다)
+  function itemDoc(it){
+    return {
+      id: Number(it.id) || 0,
+      url: String(it.url || ''),
+      title: String(it.title || ''),
+      folder: String(it.folder || ''),
+      memo: String(it.memo || ''),
+      file: String(it.file || ''),
+      fileKind: String(it.fileKind || ''),
+      createdAt: String(it.createdAt || it.updatedAt || ''),
+      updatedAt: String(it.updatedAt || it.createdAt || '')
+    };
+  }
+  // 내용 비교용 서명 — id는 기기마다 다를 수 있어 뺀다
+  function itemSig(x){
+    const d = itemDoc(x);
+    return JSON.stringify([d.url, d.title, d.folder, d.memo, d.file, d.fileKind, d.createdAt, d.updatedAt]);
+  }
+  const itemAt = x => String(x.updatedAt || x.createdAt || '');
+  const memoSig = x => JSON.stringify(normalizeMemo(x));
+  const memoAt = x => Number(x.updatedAt) || Number(x.createdAt) || 0;
+
+  /* 원격 링크 문서들을 로컬에 적용한다.
+     반환: 새 items / 삭제기록, 로컬이 바뀌었는지, 로컬 쪽이 더 최신이라 올려야 하는지 */
+  function applyItems(items, tombsItems, docs){
+    const byUrl = new Map(items.map(it=>[it.url, it]));
+    const tomb = new Map((tombsItems||[]).map(t=>[t.url, t]));
+    const usedIds = new Set(items.map(it=>Number(it.id)));
+    let maxId = items.reduce((m,it)=>Math.max(m, Number(it.id)||0), 0);
+    let changed = false, localNewer = false;
+    const newId = ()=>{ maxId = Math.max(maxId + 1, Date.now()); usedIds.add(maxId); return maxId; };
+
+    for(const { data } of docs){
+      const url = data && data.url; if(!url) continue;
+      const rAt = String(data.updatedAt || '');
+      const local = byUrl.get(url);
+
+      if(data._deleted){
+        if(local){
+          if(itemAt(local) <= rAt){ byUrl.delete(url); changed = true; }
+          else localNewer = true;                     // 지운 뒤에 이 기기에서 더 나중에 고침 → 살려서 올린다
+        }
+        const t = tomb.get(url);
+        if(!t || t.at < rAt){ tomb.set(url, { url, at: rAt }); changed = true; }
+        continue;
+      }
+      const t = tomb.get(url);
+      if(t && t.at >= rAt){ if(!local) { localNewer = true; continue; } }  // 이 기기에서 더 나중에 지웠음 → 삭제를 올린다
+      if(!local){
+        let id = Number(data.id) || 0;
+        if(!id || usedIds.has(id)) id = newId(); else { usedIds.add(id); maxId = Math.max(maxId, id); }
+        const d = itemDoc(data); d.id = id;
+        byUrl.set(url, d); changed = true;
+        if(t){ tomb.delete(url); }                     // 원격이 더 최신으로 되살림
+        continue;
+      }
+      const lAt = itemAt(local);
+      if(lAt < rAt || (lAt === rAt && itemSig(data) > itemSig(local))){
+        const keep = local.id;
+        Object.assign(local, itemDoc(data)); local.id = keep;   // 이 기기의 id는 유지 (화면 버튼이 id를 쓴다)
+        changed = true;
+      }else if(lAt > rAt || itemSig(data) !== itemSig(local)){
+        localNewer = true;
+      }
+    }
+    return {
+      items: [...byUrl.values()].sort((a,b)=> (b.createdAt||'').localeCompare(a.createdAt||'')),
+      tombsItems: [...tomb.values()].slice(-500),
+      changed, localNewer
+    };
+  }
+
+  /* 원격 메모 문서들을 로컬에 적용한다. skipId = 지금 타자 치는 중인 메모 (건드리지 않음) */
+  function applyMemos(memos, tombsMemos, docs, skipId){
+    const byId = new Map(memos.map(m=>[m.id, m]));
+    const tomb = new Map((tombsMemos||[]).map(t=>[t.id, t]));
+    let changed = false, localNewer = false;
+    const changedIds = [];
+
+    for(const { data } of docs){
+      const id = data && data.id; if(!id) continue;
+      if(id === skipId){ localNewer = true; continue; }
+      const rAt = Number(data.updatedAt) || 0;
+      const local = byId.get(id);
+
+      if(data._deleted){
+        if(local){
+          if(memoAt(local) <= rAt){ byId.delete(id); changed = true; changedIds.push(id); }
+          else localNewer = true;
+        }
+        const t = tomb.get(id);
+        if(!t || t.at < rAt){ tomb.set(id, { id, at: rAt }); changed = true; }
+        continue;
+      }
+      const t = tomb.get(id);
+      if(t && t.at >= rAt && !local){ localNewer = true; continue; }
+      const nm = normalizeMemo(data);
+      if(!nm) continue;
+      if(!local){
+        byId.set(id, nm); changed = true; changedIds.push(id);
+        if(t) tomb.delete(id);
+        continue;
+      }
+      const lAt = memoAt(local);
+      if(lAt < rAt || (lAt === rAt && memoSig(nm) > memoSig(local))){
+        byId.set(id, nm); changed = true; changedIds.push(id);
+      }else if(lAt > rAt || memoSig(nm) !== memoSig(local)){
+        localNewer = true;
+      }
+    }
+    return { memos: [...byId.values()], tombsMemos: [...tomb.values()].slice(-300), changed, localNewer, changedIds };
+  }
+
+  /* 원격 상태(R)와 비교해 올려야 할 쓰기 목록을 만든다.
+     R = { items: Map(key→{updatedAt,sig,deleted}), memos: Map(id→{updatedAt,sig,deleted}), folders: {list,updatedAt}|null } */
+  function planPush(L, R){
+    const ops = [];
+    const liveUrls = new Set(L.items.map(it=>it.url));
+    for(const it of L.items){
+      const k = itemKey(it.url), r = R.items.get(k), at = itemAt(it), sig = itemSig(it);
+      if(!r){ ops.push(['items', k, itemDoc(it)]); continue; }
+      if(r.deleted){ if(at > r.updatedAt) ops.push(['items', k, itemDoc(it)]); continue; }
+      if(r.sig === sig) continue;
+      if(at > r.updatedAt || (at === r.updatedAt && sig > r.sig)) ops.push(['items', k, itemDoc(it)]);
+    }
+    for(const t of (L.tombsItems||[])){
+      if(liveUrls.has(t.url)) continue;                       // 다시 살아난 링크는 위에서 처리
+      const k = itemKey(t.url), r = R.items.get(k);
+      if(r && r.deleted && r.updatedAt >= t.at) continue;     // 이미 삭제 표시됨
+      if(r && !r.deleted && r.updatedAt > t.at) continue;     // 지운 뒤 다른 기기에서 더 나중에 고침 → 원격이 이김
+      ops.push(['items', k, { url: t.url, _deleted: true, updatedAt: t.at }]);
+    }
+
+    const liveIds = new Set(L.memos.map(m=>m.id));
+    for(const m of L.memos){
+      const r = R.memos.get(m.id), at = memoAt(m), nm = normalizeMemo(m);
+      if(!nm) continue;
+      const sig = JSON.stringify(nm);
+      if(!r){ ops.push(['memos', m.id, nm]); continue; }
+      if(r.deleted){ if(at > r.updatedAt) ops.push(['memos', m.id, nm]); continue; }
+      if(r.sig === sig) continue;
+      if(at > r.updatedAt || (at === r.updatedAt && sig > r.sig)) ops.push(['memos', m.id, nm]);
+    }
+    for(const t of (L.tombsMemos||[])){
+      if(liveIds.has(t.id)) continue;
+      const r = R.memos.get(t.id);
+      if(r && r.deleted && r.updatedAt >= t.at) continue;
+      if(r && !r.deleted && r.updatedAt > t.at) continue;
+      ops.push(['memos', t.id, { id: t.id, _deleted: true, updatedAt: t.at }]);
+    }
+
+    const rf = R.folders;
+    if(!rf || (L.foldersAt > rf.updatedAt && JSON.stringify(rf.list) !== JSON.stringify(L.folders)))
+      ops.push(['meta', 'folders', { list: L.folders.slice(), updatedAt: L.foldersAt || Date.now() }]);
+    return ops;
+  }
+
+  // 원격 상태표에 넣을 요약 (문서 1개)
+  function remoteEntry(col, data){
+    if(col === 'items') return { updatedAt: String(data.updatedAt || ''), sig: data._deleted ? '' : itemSig(data), deleted: !!data._deleted };
+    return { updatedAt: Number(data.updatedAt) || 0, sig: data._deleted ? '' : memoSig(data), deleted: !!data._deleted };
+  }
+
+  return { hash64, itemKey, itemDoc, itemSig, memoSig, applyItems, applyMemos, planPush, remoteEntry };
+})();
+
+/* ---------- Firebase 연결 (화면·SDK) ---------- */
+const fb = {
+  ready: false, user: null, db: null, unsubs: [],
+  remote: { items: new Map(), memos: new Map(), folders: null },
+  synced: { items: false, memos: false, folders: false },
+  initialDone: false, pushTimer: null, pushing: false, pushAgain: false,
+  error: '', lastAt: 0, retryTimer: null, retryMs: 5000, lastToast: '',
+  lastFoldersJson: ''
+};
+const FB_FOLDERS_AT = 'linkarchive-folders-at';
+function fbActive(){ return !!(fb.user && fb.db); }
+function fbConnected(){ return fbActive() && fb.synced.items && fb.synced.memos && fb.synced.folders; }
+function foldersAt(){ return Number(localStorage.getItem(FB_FOLDERS_AT)) || 0; }
+function setFoldersAt(t){ try{ localStorage.setItem(FB_FOLDERS_AT, String(t)); }catch(e){} }
+// persistAll 이 부를 때마다 폴더가 바뀌었는지 스스로 알아챈다 (폴더를 고치는 곳을 일일이 건드리지 않기 위해)
+function fbNoteFolders(){
+  const j = JSON.stringify(folders);
+  if(j !== fb.lastFoldersJson){ fb.lastFoldersJson = j; setFoldersAt(Date.now()); }
+}
+
+function loadScript(src){
+  return new Promise((ok, no)=>{
+    const s = document.createElement('script');
+    s.src = src; s.onload = ok; s.onerror = ()=>no(new Error('불러오기 실패'));
+    document.head.appendChild(s);
+  });
+}
+
+async function fbInit(){
+  fb.lastFoldersJson = JSON.stringify(folders);
+  if(!FIREBASE_CONFIG){ renderFbStatus(); return; }
+  try{
+    await loadScript(FB_SDK + 'firebase-app-compat.js');
+    await Promise.all([loadScript(FB_SDK + 'firebase-auth-compat.js'), loadScript(FB_SDK + 'firebase-firestore-compat.js')]);
+    firebase.initializeApp(FIREBASE_CONFIG);
+    fb.ready = true;
+    firebase.auth().onAuthStateChanged(u => u ? fbStart(u) : fbStop());
+    firebase.auth().getRedirectResult().catch(fbFail);   // 리다이렉트 로그인에서 돌아온 경우
+  }catch(e){
+    fb.error = '실시간 동기화 부품을 불러오지 못했어요 (인터넷 연결 확인)';
+  }
+  renderFbStatus();
+}
+
+async function fbLogin(){
+  if(!FIREBASE_CONFIG){ toast('아직 Firebase 설정이 들어가지 않았어요'); return; }
+  if(!fb.ready){ toast('불러오는 중이에요 — 잠시 후 다시 눌러주세요'); return; }
+  const provider = new firebase.auth.GoogleAuthProvider();
+  provider.setCustomParameters({ prompt: 'select_account' });
+  try{
+    await firebase.auth().signInWithPopup(provider);
+  }catch(e){
+    if(e.code === 'auth/popup-blocked' || e.code === 'auth/operation-not-supported-in-this-environment'){
+      await firebase.auth().signInWithRedirect(provider); return;
+    }
+    if(e.code === 'auth/popup-closed-by-user' || e.code === 'auth/cancelled-popup-request'){ toast('로그인을 취소했어요'); return; }
+    fbFail(e);
+  }
+}
+async function fbLogout(){
+  if(!confirm('이 기기에서 실시간 동기화를 끌까요?\n이 기기의 링크·메모는 그대로 남아 있어요.')) return;
+  settings.fbWanted = false; save(LS.settings, settings);
+  await firebase.auth().signOut();
+}
+
+function fbStart(user){
+  fbStop(true);
+  fb.user = user; fb.db = firebase.firestore();
+  fb.remote = { items: new Map(), memos: new Map(), folders: null };
+  fb.synced = { items: false, memos: false, folders: false };
+  fb.initialDone = false; fb.error = '';
+  settings.fbWanted = true; save(LS.settings, settings);   // 다음에 앱을 열면 GitHub 동기화는 건너뛴다
+  clearTimeout(syncTimer);                                  // 예약돼 있던 GitHub 업로드 취소
+  setCloudIcon('⏳'); renderFbStatus();
+  const base = fb.db.collection('users').doc(user.uid);
+  const opt = { includeMetadataChanges: true };
+  fb.unsubs.push(base.collection('items').onSnapshot(opt, fbOnItems, fbListenFail));
+  fb.unsubs.push(base.collection('memos').onSnapshot(opt, fbOnMemos, fbListenFail));
+  fb.unsubs.push(base.collection('meta').doc('folders').onSnapshot(opt, fbOnFolders, fbListenFail));
+}
+function fbStop(quiet){
+  fb.unsubs.forEach(u=>{ try{ u(); }catch(e){} });
+  fb.unsubs = [];
+  clearTimeout(fb.pushTimer); clearTimeout(fb.retryTimer);
+  const was = !!fb.user;
+  fb.user = null; fb.db = null;
+  setCloudIcon('☁️'); renderFbStatus();
+  if(was && !quiet) toast('이 기기의 실시간 동기화를 껐어요');
+}
+
+function fbOnItems(snap){
+  const docs = [];
+  snap.docChanges().forEach(ch=>{
+    if(ch.type === 'removed'){ fb.remote.items.delete(ch.doc.id); return; }
+    const d = ch.doc.data();
+    fb.remote.items.set(ch.doc.id, FBCore.remoteEntry('items', d));
+    docs.push({ data: d });
+  });
+  if(docs.length){
+    const r = FBCore.applyItems(items, tombs.items, docs);
+    if(r.changed){
+      items = r.items; tombs.items = r.tombsItems;
+      save(LS.items, items); save(LS.tombs, tombs);
+      fbRerender([]);
+    }
+    if(r.localNewer) fbSchedulePush();
+  }
+  fbAfterSnapshot('items', snap);
+}
+function fbOnMemos(snap){
+  const docs = [];
+  snap.docChanges().forEach(ch=>{
+    if(ch.type === 'removed'){ fb.remote.memos.delete(ch.doc.id); return; }
+    const d = ch.doc.data();
+    fb.remote.memos.set(ch.doc.id, FBCore.remoteEntry('memos', d));
+    docs.push({ data: d });
+  });
+  if(docs.length){
+    const typing = inMemoEditor() && Date.now() - memoTypingAt < 4000 ? curMemoId : null;
+    const r = FBCore.applyMemos(memos, tombs.memos, docs, typing);
+    if(r.changed){
+      memos = r.memos; tombs.memos = r.tombsMemos;
+      save(LS.memos, memos); save(LS.tombs, tombs);
+      fbRerender(r.changedIds);
+    }
+    if(r.localNewer) fbSchedulePush();
+  }
+  fbAfterSnapshot('memos', snap);
+}
+function fbOnFolders(snap){
+  const d = snap.exists ? snap.data() : null;
+  fb.remote.folders = d ? { list: Array.isArray(d.list) ? d.list.map(String) : [], updatedAt: Number(d.updatedAt) || 0 } : null;
+  if(snap.metadata.fromCache && !fb.synced.folders) return;    // 서버 값을 받기 전에는 판단하지 않는다
+  const rf = fb.remote.folders;
+  if(!fb.synced.folders){
+    // 이 기기가 처음 연결될 때: 양쪽 폴더를 합친다 (어느 기기의 폴더도 잃지 않도록)
+    const merged = rf ? rf.list.slice() : [];
+    folders.forEach(f=>{ if(!merged.includes(f)) merged.push(f); });
+    fbSetFolders(merged, rf && JSON.stringify(merged) === JSON.stringify(rf.list) ? rf.updatedAt : Date.now());
+  }else if(rf && rf.updatedAt > foldersAt()){
+    fbSetFolders(rf.list.slice(), rf.updatedAt);
+  }else if(!rf || foldersAt() > rf.updatedAt){
+    fbSchedulePush();
+  }
+  fbAfterSnapshot('folders', snap);
+}
+function fbSetFolders(list, at){
+  const changed = JSON.stringify(list) !== JSON.stringify(folders);
+  if(changed){ folders = list.length ? list : folders; save(LS.folders, folders); }
+  fb.lastFoldersJson = JSON.stringify(folders);
+  setFoldersAt(at);
+  if(changed) fbRerender([]);
+}
+function fbAfterSnapshot(col, snap){
+  fb.lastAt = Date.now();
+  if(!snap.metadata.fromCache && !fb.synced[col]){
+    fb.synced[col] = true;
+    if(fbConnected() && !fb.initialDone){
+      fb.initialDone = true; fb.retryMs = 5000;
+      // 서버 상태를 다 받은 뒤에야 이 기기의 내용을 올린다 (모르고 덮어쓰지 않도록)
+      fbPushNow(false).then(()=>{ if(!fb.error) toast('☁️ 실시간 동기화 연결됨'); });
+    }
+  }
+  if(fbConnected() && !fb.pushing && !fb.error) setCloudIcon(navigator.onLine ? '☁️' : '⚠️');
+  if(document.getElementById('settings-modal').classList.contains('on')) renderFbStatus();
+}
+
+// 받은 변경을 화면에 반영 (입력 중인 메모는 덮어쓰지 않는다)
+function fbRerender(changedMemoIds){
+  if(document.getElementById('view-archive').classList.contains('active')) renderArchive();
+  if(document.getElementById('view-memo').classList.contains('active')) renderMemoView();
+  if(inMemoEditor()){
+    if(!curMemo()){ curMemoId = null; showView('memo'); toast('다른 기기에서 이 메모를 지웠어요'); }
+    else if(changedMemoIds.includes(curMemoId) && Date.now() - memoTypingAt > 4000) renderMemoEditor();
+    else renderMemoFolderRow();
+  }
+}
+
+function fbSchedulePush(){
+  if(!fbActive()) return;
+  clearTimeout(fb.pushTimer);
+  fb.pushTimer = setTimeout(()=>fbPushNow(false), 600);
+}
+async function fbPushNow(manual){
+  if(!fbActive()) return;
+  if(!fbConnected()){ if(manual) toast('아직 연결 중이에요…'); return; }
+  if(fb.pushing){ fb.pushAgain = true; return; }
+  if(inMemoEditor()) saveMemoEdits();
+  const ops = FBCore.planPush({ items, tombsItems: tombs.items, memos, tombsMemos: tombs.memos, folders, foldersAt: foldersAt() }, fb.remote);
+  if(!ops.length){
+    if(manual) toast('☁️ 실시간 연결 중 · 링크 ' + items.length + '개 · 메모 ' + memos.filter(m=>!m.deleted).length + '개');
+    return;
+  }
+  fb.pushing = true; setCloudIcon('⏳');
+  const base = fb.db.collection('users').doc(fb.user.uid);
+  try{
+    for(let i = 0; i < ops.length; i += 400){           // 한 묶음 최대 500건 제한
+      const batch = fb.db.batch();
+      ops.slice(i, i + 400).forEach(([col, id, data])=> batch.set(base.collection(col).doc(String(id)), data));
+      await batch.commit();
+    }
+    fb.lastAt = Date.now(); fb.error = '';
+    setCloudIcon('☁️');
+    if(manual) toast('☁️ 올렸어요 (' + ops.length + '건)');
+  }catch(e){
+    fbFail(e);
+  }finally{
+    fb.pushing = false;
+    if(fb.pushAgain){ fb.pushAgain = false; fbSchedulePush(); }
+    if(document.getElementById('settings-modal').classList.contains('on')) renderFbStatus();
+  }
+}
+
+function fbErrorText(e){
+  const c = (e && e.code) || '';
+  if(c === 'permission-denied' || c === 'firestore/permission-denied') return 'Firestore 규칙이 막고 있어요 — 규칙을 다시 게시해 주세요';
+  if(c === 'auth/unauthorized-domain') return 'Firebase 승인된 도메인에 odc1966-dev.github.io 를 추가해 주세요';
+  if(c === 'auth/operation-not-allowed') return 'Firebase Authentication에서 Google 로그인을 켜 주세요';
+  if(c === 'not-found' || c === 'failed-precondition') return 'Firestore 데이터베이스가 아직 없어요 — 콘솔에서 만들어 주세요';
+  if(c === 'unavailable' || c === 'auth/network-request-failed') return '서버에 연결하지 못했어요 (인터넷 확인)';
+  if(c === 'resource-exhausted') return '오늘 무료 사용량을 넘었어요 — 내일 자동으로 풀려요';
+  return (e && e.message) ? String(e.message).slice(0, 120) : '알 수 없는 오류';
+}
+function fbFail(e){
+  console.error('[실시간 동기화]', e);
+  fb.error = fbErrorText(e);
+  setCloudIcon('⚠️');
+  if(fb.lastToast !== fb.error){ fb.lastToast = fb.error; toast('⚠️ 실시간 동기화: ' + fb.error); }
+  renderFbStatus();
+}
+// 실시간 연결이 끊기면 조금 기다렸다가 다시 붙는다 (간격은 점점 늘려 최대 1분)
+function fbListenFail(e){
+  fbFail(e);
+  const user = fb.user;
+  if(!user) return;
+  clearTimeout(fb.retryTimer);
+  fb.retryTimer = setTimeout(()=>{ if(fb.user && fb.user.uid === user.uid) fbStart(user); }, fb.retryMs);
+  fb.retryMs = Math.min(fb.retryMs * 2, 60000);
+}
+
+function renderFbStatus(){
+  const el = document.getElementById('fb-status'); if(!el) return;
+  const inBtn = document.getElementById('fb-login-btn'), outBtn = document.getElementById('fb-logout-btn');
+  if(!FIREBASE_CONFIG){
+    el.innerHTML = '⚪ 준비 중 — Firebase 설정이 들어가면 켤 수 있어요';
+    inBtn.style.display = 'none'; outBtn.style.display = 'none';
+    return;
+  }
+  if(fbActive()){
+    el.innerHTML = (fb.error ? '🔴 <b>문제 있음</b> — ' + esc(fb.error)
+                  : fbConnected() ? '🟢 <b>실시간 연결됨</b>' : '⏳ 연결 중…')
+      + '<br>계정: ' + esc(fb.user.email || '(이메일 없음)')
+      + '<br>이 기기: 링크 ' + items.length + '개 · 메모 ' + memos.filter(m=>!m.deleted).length + '개'
+      + (fb.lastAt ? ' · 마지막 반영 ' + new Date(fb.lastAt).toLocaleTimeString('ko-KR') : '')
+      + '<br>이 기기에서는 아래 GitHub 동기화가 쉬고 있어요';
+    inBtn.style.display = 'none'; outBtn.style.display = '';
+  }else{
+    el.innerHTML = (fb.error ? '🔴 ' + esc(fb.error) + '<br>' : '')
+      + (fb.ready ? '⚪ 꺼짐 — Google 계정으로 로그인하면 폰·PC가 바로바로 맞춰져요' : '⏳ 불러오는 중…');
+    inBtn.style.display = ''; outBtn.style.display = 'none';
+  }
+}
+</script>
+<script>
+/* ============================================================
    상태 및 저장소
    ============================================================ */
 const LS = { items:'linkarchive-items', folders:'linkarchive-folders', settings:'linkarchive-settings', tombs:'linkarchive-tombs', memos:'linkarchive-memos' };
@@ -686,7 +1159,8 @@ function load(key, fallback){
 function save(key, val){ localStorage.setItem(key, JSON.stringify(val)); }
 function persistAll(){
   save(LS.items, items); save(LS.folders, folders); save(LS.tombs, tombs); save(LS.memos, memos);
-  scheduleSync(); // 변경이 있으면 잠시 후 자동 동기화
+  fbNoteFolders(); fbSchedulePush();   // 실시간 동기화 (로그인돼 있을 때만 동작)
+  scheduleSync(); // 변경이 있으면 잠시 후 자동 동기화 (GitHub — 실시간 동기화 중에는 쉰다)
 }
 
 /* ============================================================
@@ -1843,6 +2317,7 @@ function openSettings(){
   document.getElementById('set-ghtoken').value = settings.ghToken || '';
   onProviderChange();
   document.getElementById('app-ver').textContent = SW_EXPECTED.replace('linkarchive-','앱 ');
+  renderFbStatus();
   renderSyncStatus();
   renderTokenCheck();
   renderStorageStatus();
@@ -1858,18 +2333,18 @@ function saveSettings(){
   // 형식이 확실히 틀린 토큰은 저장하지 않는다 (저장하면 계속 실패만 반복됨)
   const c = checkTokenFormat(newToken);
   if(c.level === 'bad'){ toast('❌ ' + c.msg); return; }
-  settings = {
+  settings = Object.assign({}, settings, {   // 여기 없는 설정(메모 정렬·실시간 동기화 상태 등)은 그대로 둔다
     provider: document.getElementById('set-provider').value,
     apiKey: document.getElementById('set-key').value.trim(),
     model: document.getElementById('set-model').value.trim(),
     autoDownload: document.getElementById('set-autodl').checked,
     ghToken: newToken,
     gistId: newToken === (settings.ghToken || '') ? (settings.gistId || '') : '' // 토큰이 바뀌면 저장소 다시 찾기
-  };
+  });
   save(LS.settings, settings);
   closeModal('settings-modal');
   setCloudIcon('☁️');
-  if(settings.ghToken){ toast('설정 저장! 동기화를 시작해요'); syncNow(false); }
+  if(settings.ghToken && !fbActive()){ toast('설정 저장! 동기화를 시작해요'); syncNow(false); }
   else toast(settings.apiKey ? 'AI 분류 설정 완료!' : '저장됨 (키 없음 → 키워드 분류)');
 }
 async function testApi(){
@@ -2174,6 +2649,7 @@ function normalizeMemo(m){
 function mergeData(remote){ return mergeSets(remote, { items, folders, memos, tombs }); }
 
 async function syncNow(manual){
+  if(fbActive()){ if(manual) fbPushNow(true); return; }   // 실시간 동기화 중: ☁️ 버튼은 지금 상태 확인
   if(!settings.ghToken || syncing) return;
   saveMemoEdits();                       // 쓰던 메모를 먼저 반영해야 병합에서 밀리지 않는다
   if(!manual && Date.now() - memoTypingAt < 4000){ scheduleSync(); return; }  // 타자 치는 중에는 미룬다
@@ -2242,13 +2718,13 @@ async function syncNow(manual){
 }
 // 변경 후 3초 뒤에 한 번만 업로드 (연속 수정을 묶어서 처리)
 function scheduleSync(){
-  if(!settings.ghToken) return;
+  if(!settings.ghToken || fbActive()) return;
   clearTimeout(syncTimer);
   syncTimer = setTimeout(()=>syncNow(false), 3000);
 }
 function setCloudIcon(ch){
   const b = document.getElementById('cloud-btn');
-  b.style.display = settings.ghToken ? '' : 'none';
+  b.style.display = (settings.ghToken || fbActive()) ? '' : 'none';
   b.textContent = ch;
 }
 /* 붙여넣기 사고를 미리 잡아낸다.
@@ -2317,7 +2793,7 @@ function renderSyncStatus(){
    오래된 서비스워커가 남아 있으면 GitHub 통신이 막히는 문제가 있었다.
    그래서 버전을 확인해 다르면 한 번만 자동으로 완전 새로고침한다.
    ============================================================ */
-const SW_EXPECTED = 'linkarchive-v19';
+const SW_EXPECTED = 'linkarchive-v20';
 
 // 실행 중인 서비스워커의 버전을 물어본다
 async function swVersion(){
@@ -2372,6 +2848,11 @@ async function runDiagnostics(){
   out.innerHTML = '진단 중… (10초 정도 걸릴 수 있어요)';
   const L = [];
   L.push('인터넷: ' + (navigator.onLine ? '🟢 연결됨' : '🔴 끊김'));
+  L.push('실시간 동기화: ' + (!FIREBASE_CONFIG ? '⚪ 설정 전'
+    : fbConnected() ? '🟢 연결됨 (' + esc(fb.user.email || '') + ')'
+    : fbActive() ? '⏳ 연결 중'
+    : fb.ready ? '⚪ 로그인 안 함' : '🔴 부품을 못 불러옴')
+    + (fb.error ? ' — 🔴 ' + esc(fb.error) : ''));
   const ver = await swVersion();
   L.push('앱 버전: ' + (ver === null ? '(서비스워커 없음)' : esc(ver)) +
     (ver === SW_EXPECTED || ver === null ? ' 🟢' : ' 🔴 오래된 버전 → [앱 완전 새로고침]을 눌러주세요'));
@@ -2394,7 +2875,9 @@ async function runDiagnostics(){
 ensurePersistentStorage();
 updateBadge();
 setCloudIcon('☁️');
-if(settings.ghToken) syncNow(false); // 앱을 열면 다른 기기의 변경 사항을 가져온다
+if(settings.ghToken && !settings.fbWanted) syncNow(false); // 앱을 열면 다른 기기의 변경 사항을 가져온다 (실시간 동기화 사용 기기는 제외)
+fbInit();                                                  // 실시간 동기화 (Firebase)
+window.addEventListener('offline', ()=>{ if(fbActive()) setCloudIcon('⚠️'); });
 
 /* ============================================================
    자동 가져오기 — 다른 기기의 변경을 빨리 받아온다
@@ -2409,7 +2892,7 @@ function autoPull(){
 }
 document.addEventListener('visibilitychange', ()=>{ if(!document.hidden) autoPull(); }); // 앱으로 돌아올 때
 window.addEventListener('focus', autoPull);                                              // 창을 다시 클릭할 때
-window.addEventListener('online', ()=>{ setCloudIcon('☁️'); autoPull(); });              // 인터넷 복구될 때
+window.addEventListener('online', ()=>{ setCloudIcon('☁️'); autoPull(); if(fbActive()) fbSchedulePush(); });              // 인터넷 복구될 때
 setInterval(()=>{ if(!document.hidden && navigator.onLine) autoPull(); }, 45000);         // 보고 있는 동안 45초마다
 initServiceWorker();
 </script>
