@@ -685,6 +685,9 @@ const FIREBASE_CONFIG = {
   measurementId: "G-8HDTLD10GJ"
 };
 const FB_SDK = 'https://www.gstatic.com/firebasejs/12.19.0/';
+const ONLINE_URL = 'https://odc1966-dev.github.io/link-archivist/';
+// 파일로 열면(file://) Google 로그인이 막힌다 — 저장 공간도 온라인 주소와 따로라서 데이터가 서로 안 보인다
+const FB_FILE_MODE = location.protocol === 'file:';
 
 /* ---------- 순수 로직 (화면·Firebase와 무관 — 테스트 대상) ---------- */
 const FBCore = (function(){
@@ -901,6 +904,7 @@ function loadScript(src){
 
 async function fbInit(){
   fb.lastFoldersJson = JSON.stringify(folders);
+  if(FB_FILE_MODE){ showFileModeBanner(); renderFbStatus(); return; }
   if(!FIREBASE_CONFIG){ renderFbStatus(); return; }
   try{
     await loadScript(FB_SDK + 'firebase-app-compat.js');
@@ -916,6 +920,7 @@ async function fbInit(){
 }
 
 async function fbLogin(){
+  if(FB_FILE_MODE){ toast('파일로 열린 앱에서는 로그인할 수 없어요 — 온라인 주소로 열어 주세요'); return; }
   if(!FIREBASE_CONFIG){ toast('아직 Firebase 설정이 들어가지 않았어요'); return; }
   if(!fb.ready){ toast('불러오는 중이에요 — 잠시 후 다시 눌러주세요'); return; }
   const provider = new firebase.auth.GoogleAuthProvider();
@@ -923,8 +928,9 @@ async function fbLogin(){
   try{
     await firebase.auth().signInWithPopup(provider);
   }catch(e){
-    if(e.code === 'auth/popup-blocked' || e.code === 'auth/operation-not-supported-in-this-environment'){
-      await firebase.auth().signInWithRedirect(provider); return;
+    if(e.code === 'auth/popup-blocked'){                    // 팝업이 막히면 화면 전환 방식으로
+      try{ await firebase.auth().signInWithRedirect(provider); }catch(e2){ fbFail(e2); }
+      return;
     }
     if(e.code === 'auth/popup-closed-by-user' || e.code === 'auth/cancelled-popup-request'){ toast('로그인을 취소했어요'); return; }
     fbFail(e);
@@ -1087,6 +1093,8 @@ async function fbPushNow(manual){
 function fbErrorText(e){
   const c = (e && e.code) || '';
   if(c === 'permission-denied' || c === 'firestore/permission-denied') return 'Firestore 규칙이 막고 있어요 — 규칙을 다시 게시해 주세요';
+  if(c === 'auth/operation-not-supported-in-this-environment' || c === 'auth/web-storage-unsupported')
+    return '이 창에서는 로그인할 수 없어요 — 크롬에서 ' + ONLINE_URL + ' 로 열어 주세요 (시크릿 창·파일로 연 앱은 안 돼요)';
   if(c === 'auth/unauthorized-domain') return 'Firebase 승인된 도메인에 odc1966-dev.github.io 를 추가해 주세요';
   if(c === 'auth/operation-not-allowed') return 'Firebase Authentication에서 Google 로그인을 켜 주세요';
   if(c === 'not-found' || c === 'failed-precondition') return 'Firestore 데이터베이스가 아직 없어요 — 콘솔에서 만들어 주세요';
@@ -1111,9 +1119,33 @@ function fbListenFail(e){
   fb.retryMs = Math.min(fb.retryMs * 2, 60000);
 }
 
+// 파일 버전에 데이터가 있으면 옮기는 방법을 알려준다 (저장 공간이 온라인 주소와 따로라서)
+function fileModeDataNote(){
+  const nItems = items.length, nMemos = memos.filter(m=>!m.deleted).length;
+  if(!nItems && !nMemos) return '';
+  return '<br><br>이 파일 버전에만 있는 <b>링크 ' + nItems + '개 · 메모 ' + nMemos + '개</b>는 온라인 주소에서 안 보여요. 옮기려면:'
+    + '<br>① 여기서 ⚙️ → ⬇️ 백업 파일 내보내기'
+    + '<br>② 온라인 주소에서 ⚙️ → ⬆️ 백업 파일 가져오기 (합쳐지고, 지워지는 것 없음)';
+}
+function showFileModeBanner(){
+  if(document.getElementById('file-mode-bar')) return;
+  const bar = document.createElement('div');
+  bar.id = 'file-mode-bar';
+  bar.style.cssText = 'margin:0 16px 8px;padding:10px 12px;border-radius:12px;background:#FEF3C7;color:#92400E;font-size:.82rem;font-weight:700;line-height:1.5';
+  bar.innerHTML = '⚠️ 파일로 열린 앱이에요 — 실시간 동기화가 안 돼요. '
+    + '<a href="' + ONLINE_URL + '" style="color:#B45309;text-decoration:underline">온라인 주소로 열기</a>';
+  document.querySelector('header').insertAdjacentElement('afterend', bar);
+}
 function renderFbStatus(){
   const el = document.getElementById('fb-status'); if(!el) return;
   const inBtn = document.getElementById('fb-login-btn'), outBtn = document.getElementById('fb-logout-btn');
+  if(FB_FILE_MODE){
+    el.innerHTML = '🔴 <b>파일로 열린 앱이에요</b> — 실시간 동기화는 온라인 주소에서만 돼요'
+      + '<br><a href="' + ONLINE_URL + '" style="color:var(--primary);font-weight:700">🌐 온라인 주소로 열기</a>'
+      + fileModeDataNote();
+    inBtn.style.display = 'none'; outBtn.style.display = 'none';
+    return;
+  }
   if(!FIREBASE_CONFIG){
     el.innerHTML = '⚪ 준비 중 — Firebase 설정이 들어가면 켤 수 있어요';
     inBtn.style.display = 'none'; outBtn.style.display = 'none';
@@ -2793,7 +2825,7 @@ function renderSyncStatus(){
    오래된 서비스워커가 남아 있으면 GitHub 통신이 막히는 문제가 있었다.
    그래서 버전을 확인해 다르면 한 번만 자동으로 완전 새로고침한다.
    ============================================================ */
-const SW_EXPECTED = 'linkarchive-v20';
+const SW_EXPECTED = 'linkarchive-v21';
 
 // 실행 중인 서비스워커의 버전을 물어본다
 async function swVersion(){
@@ -2848,7 +2880,8 @@ async function runDiagnostics(){
   out.innerHTML = '진단 중… (10초 정도 걸릴 수 있어요)';
   const L = [];
   L.push('인터넷: ' + (navigator.onLine ? '🟢 연결됨' : '🔴 끊김'));
-  L.push('실시간 동기화: ' + (!FIREBASE_CONFIG ? '⚪ 설정 전'
+  L.push('실시간 동기화: ' + (FB_FILE_MODE ? '🔴 파일로 열림 — 온라인 주소로 열어야 함'
+    : !FIREBASE_CONFIG ? '⚪ 설정 전'
     : fbConnected() ? '🟢 연결됨 (' + esc(fb.user.email || '') + ')'
     : fbActive() ? '⏳ 연결 중'
     : fb.ready ? '⚪ 로그인 안 함' : '🔴 부품을 못 불러옴')
