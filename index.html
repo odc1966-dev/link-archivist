@@ -133,8 +133,9 @@ main{flex:1;overflow-y:auto;padding:4px 16px 90px}
   white-space:nowrap;overflow:hidden;text-overflow:ellipsis;display:block;
 }
 .card-memo{font-size:.82rem;color:var(--text-sub);margin-top:6px;line-height:1.45}
-.chip-row{display:flex;gap:6px;overflow-x:auto;margin-top:10px;padding-bottom:2px;scrollbar-width:none}
-.chip-row::-webkit-scrollbar{display:none}
+/* 폴더 칩 줄: 가로로 밀지 않고 여러 줄로 접는다
+   (스크롤바를 숨겨 두면 PC 마우스로는 옆으로 밀 방법이 없어 가려진 폴더를 못 고른다) */
+.chip-row{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px}
 .chip{
   flex-shrink:0;font-size:.78rem;font-weight:600;padding:6px 12px;
   border-radius:20px;border:1.5px solid var(--border);
@@ -153,8 +154,7 @@ main{flex:1;overflow-y:auto;padding:4px 16px 90px}
   background:var(--card);box-shadow:var(--shadow);
 }
 #search:focus{outline:none;border-color:var(--primary)}
-#folder-filter{display:flex;gap:6px;overflow-x:auto;margin:12px 0;padding-bottom:2px;scrollbar-width:none}
-#folder-filter::-webkit-scrollbar{display:none}
+#folder-filter{display:flex;flex-wrap:wrap;gap:6px;margin:12px 0}
 .archive-card{
   background:var(--card);border-radius:var(--radius);box-shadow:var(--shadow);
   padding:14px;margin-bottom:10px;cursor:pointer;
@@ -236,8 +236,8 @@ nav button.on{color:var(--primary)}
 #toast.on{opacity:1;transform:translateX(-50%) translateY(0)}
 
 /* ---------- 4. 메모 화면 ---------- */
-#memo-filter{display:flex;gap:6px;overflow-x:auto;margin:12px 0;padding-bottom:2px;scrollbar-width:none}
-#memo-filter::-webkit-scrollbar{display:none}
+#memo-filter{display:flex;flex-wrap:wrap;gap:6px;margin:12px 0}
+#memo-folder-filter{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 4px}
 .memo-card{
   background:var(--card);border-radius:var(--radius);box-shadow:var(--shadow);
   padding:14px;margin-bottom:10px;cursor:pointer;
@@ -2825,7 +2825,7 @@ function renderSyncStatus(){
    오래된 서비스워커가 남아 있으면 GitHub 통신이 막히는 문제가 있었다.
    그래서 버전을 확인해 다르면 한 번만 자동으로 완전 새로고침한다.
    ============================================================ */
-const SW_EXPECTED = 'linkarchive-v21';
+const SW_EXPECTED = 'linkarchive-v22';
 
 // 실행 중인 서비스워커의 버전을 물어본다
 async function swVersion(){
