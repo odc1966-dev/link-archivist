@@ -298,6 +298,42 @@ nav button.on{color:var(--primary)}
 .todo-row button{background:none;border:none;color:var(--text-sub);cursor:pointer;font-size:.95rem;padding:0 2px}
 .save-mark{font-size:.72rem;color:var(--text-sub);white-space:nowrap}
 
+/* ---------- 6. 할 일 화면 ---------- */
+.todo-add{display:flex;gap:8px;margin:4px 0 2px}
+.todo-add input{
+  flex:1;min-width:0;padding:12px 14px;border:1.5px solid var(--border);border-radius:var(--radius);
+  font-size:.95rem;font-family:inherit;background:var(--card);box-shadow:var(--shadow);color:var(--text);
+}
+.todo-add input:focus{outline:none;border-color:var(--primary)}
+/* ＋ 버튼이 .btn 의 width:100% 를 물려받아 입력칸을 밀어내지 않도록 고정 폭으로 */
+.todo-add button{flex:0 0 auto;width:auto;margin:0;padding:0 20px;font-size:1.25rem;font-weight:800}
+#todo-search{
+  width:100%;padding:12px 16px;border:1.5px solid var(--border);border-radius:var(--radius);
+  font-size:.95rem;font-family:inherit;background:var(--card);box-shadow:var(--shadow);color:var(--text);
+}
+#todo-search:focus{outline:none;border-color:var(--primary)}
+#todo-filter{display:flex;flex-wrap:wrap;gap:6px;margin:12px 0}
+#todo-cat-filter{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 4px}
+.todo-item{
+  display:flex;align-items:flex-start;gap:10px;background:var(--card);
+  border-radius:var(--radius);box-shadow:var(--shadow);padding:12px 14px;margin-bottom:8px;
+}
+.todo-item input[type=checkbox]{width:23px;height:23px;flex-shrink:0;margin-top:1px;accent-color:var(--primary)}
+.todo-main{flex:1;min-width:0;cursor:pointer}
+.todo-text{font-size:.95rem;font-weight:600;line-height:1.45;word-break:break-all}
+.todo-item.done .todo-text{text-decoration:line-through;color:var(--text-sub)}
+.todo-note{font-size:.8rem;color:var(--text-sub);margin-top:4px;line-height:1.45;word-break:break-all}
+.todo-meta{display:flex;align-items:center;gap:6px;margin-top:7px;flex-wrap:wrap}
+.due{font-size:.72rem;font-weight:700;padding:3px 9px;border-radius:20px;background:#F1F2F6;color:var(--text-sub)}
+.due.over{background:#FEE2E2;color:var(--danger)}
+.due.today{background:#FFEDD5;color:#C2410C}
+.due.soon{background:#E0E7FF;color:var(--primary-dark)}
+.star-btn{
+  background:none;border:none;font-size:1.2rem;cursor:pointer;padding:2px 4px;
+  flex-shrink:0;line-height:1;filter:grayscale(1);opacity:.35;
+}
+.star-btn.on{filter:none;opacity:1}
+
 /* ---------- 제작자 표시 버튼(공용 모듈) 자리 조정 ----------
    기본값은 오른쪽 위인데 헤더의 ⚙️ 설정 버튼과 겹쳐서
    설정 대신 정보 화면이 열리는 일이 있었다. 하단 탭 위 왼쪽으로 내린다.
@@ -383,6 +419,23 @@ nav button.on{color:var(--primary)}
     <div id="memo-list"></div>
   </section>
 
+  <!-- ========== 6. 할 일 화면 ========== -->
+  <section id="view-todo" class="view">
+    <div class="todo-add">
+      <input id="todo-input" type="text" placeholder="할 일을 쓰고 Enter" onkeydown="onTodoKey(event)" autocomplete="off">
+      <button class="btn btn-primary" style="margin:0" onclick="addTodo()" title="추가">＋</button>
+    </div>
+    <input id="todo-search" type="search" placeholder="🔍 할 일 검색" oninput="renderTodoList()" style="margin-top:10px">
+    <div id="todo-filter"></div>
+    <div style="display:flex;align-items:center;gap:8px">
+      <p class="filter-label" style="margin:0">카테고리</p>
+      <button class="mini-btn" style="margin-left:auto" onclick="openTodoCatManager()" title="카테고리 관리">🗂️ 관리</button>
+    </div>
+    <div id="todo-cat-filter" style="margin-top:6px"></div>
+    <button class="btn btn-outline" id="todo-empty-trash" onclick="emptyTodoTrash()" style="display:none">🗑️ 휴지통 비우기</button>
+    <div id="todo-list"></div>
+  </section>
+
   <!-- ========== 5. 메모 편집 화면 ========== -->
   <section id="view-memoedit" class="view">
     <div class="edit-bar">
@@ -413,6 +466,7 @@ nav button.on{color:var(--primary)}
 <nav>
   <button id="tab-input" class="on" onclick="showView('input')"><span class="ni">✏️</span>입력</button>
   <button id="tab-review" onclick="showView('review')"><span class="ni">🔎</span>검토<span class="badge" id="review-badge" style="display:none">0</span></button>
+  <button id="tab-todo" onclick="showView('todo')"><span class="ni">✅</span>할일<span class="badge" id="todo-badge" style="display:none">0</span></button>
   <button id="tab-memo" onclick="showView('memo')"><span class="ni">📝</span>메모</button>
   <button id="tab-archive" onclick="showView('archive')"><span class="ni">📚</span>보관함</button>
 </nav>
@@ -491,6 +545,22 @@ nav button.on{color:var(--primary)}
         <button class="mini-btn" style="padding:0 16px" onclick="addFolder()">추가</button>
       </div>
     </div>
+  </div>
+</div>
+
+<!-- ========== 할 일 카테고리 관리 모달 ========== -->
+<div class="modal-bg" id="todocat-modal">
+  <div class="modal">
+    <h2>🗂️ 할 일 카테고리 <button onclick="closeModal('todocat-modal')">✕</button></h2>
+    <div id="todocat-manage-list"></div>
+    <div class="field" style="margin-top:16px">
+      <label>새 카테고리 추가</label>
+      <div style="display:flex;gap:8px">
+        <input id="new-todocat-name" type="text" placeholder="카테고리 이름" style="flex:1">
+        <button class="mini-btn" style="padding:0 16px" onclick="addTodoCat()">추가</button>
+      </div>
+    </div>
+    <p class="hint" style="text-align:left">링크·메모의 폴더와는 별개로 관리됩니다.</p>
   </div>
 </div>
 
@@ -729,6 +799,7 @@ const FBCore = (function(){
   const itemAt = x => String(x.updatedAt || x.createdAt || '');
   const memoSig = x => JSON.stringify(normalizeMemo(x));
   const memoAt = x => Number(x.updatedAt) || Number(x.createdAt) || 0;
+  const todoSig = x => JSON.stringify(normalizeTodo(x));
 
   /* 원격 링크 문서들을 로컬에 적용한다.
      반환: 새 items / 삭제기록, 로컬이 바뀌었는지, 로컬 쪽이 더 최신이라 올려야 하는지 */
@@ -821,6 +892,46 @@ const FBCore = (function(){
     return { memos: [...byId.values()], tombsMemos: [...tomb.values()].slice(-300), changed, localNewer, changedIds };
   }
 
+  /* 원격 할 일 문서들을 로컬에 적용한다. skipId = 지금 편집창을 열어 둔 할 일 */
+  function applyTodos(todos, tombsTodos, docs, skipId){
+    const byId = new Map(todos.map(t=>[t.id, t]));
+    const tomb = new Map((tombsTodos||[]).map(t=>[t.id, t]));
+    let changed = false, localNewer = false;
+
+    for(const { data } of docs){
+      const id = data && data.id; if(!id) continue;
+      if(id === skipId){ localNewer = true; continue; }
+      const rAt = Number(data.updatedAt) || 0;
+      const local = byId.get(id);
+
+      if(data._deleted){
+        if(local){
+          if(memoAt(local) <= rAt){ byId.delete(id); changed = true; }
+          else localNewer = true;
+        }
+        const t = tomb.get(id);
+        if(!t || t.at < rAt){ tomb.set(id, { id, at: rAt }); changed = true; }
+        continue;
+      }
+      const t = tomb.get(id);
+      if(t && t.at >= rAt && !local){ localNewer = true; continue; }
+      const nt = normalizeTodo(data);
+      if(!nt) continue;
+      if(!local){
+        byId.set(id, nt); changed = true;
+        if(t) tomb.delete(id);
+        continue;
+      }
+      const lAt = memoAt(local);
+      if(lAt < rAt || (lAt === rAt && todoSig(nt) > todoSig(local))){
+        byId.set(id, nt); changed = true;
+      }else if(lAt > rAt || todoSig(nt) !== todoSig(local)){
+        localNewer = true;
+      }
+    }
+    return { todos: [...byId.values()], tombsTodos: [...tomb.values()].slice(-300), changed, localNewer };
+  }
+
   /* 원격 상태(R)와 비교해 올려야 할 쓰기 목록을 만든다.
      R = { items: Map(key→{updatedAt,sig,deleted}), memos: Map(id→{updatedAt,sig,deleted}), folders: {list,updatedAt}|null } */
   function planPush(L, R){
@@ -859,19 +970,41 @@ const FBCore = (function(){
       ops.push(['memos', t.id, { id: t.id, _deleted: true, updatedAt: t.at }]);
     }
 
+    const liveTodoIds = new Set(L.todos.map(t=>t.id));
+    for(const t of L.todos){
+      const r = R.todos.get(t.id), at = memoAt(t), nt = normalizeTodo(t);
+      if(!nt) continue;
+      const sig = JSON.stringify(nt);
+      if(!r){ ops.push(['todos', t.id, nt]); continue; }
+      if(r.deleted){ if(at > r.updatedAt) ops.push(['todos', t.id, nt]); continue; }
+      if(r.sig === sig) continue;
+      if(at > r.updatedAt || (at === r.updatedAt && sig > r.sig)) ops.push(['todos', t.id, nt]);
+    }
+    for(const t of (L.tombsTodos||[])){
+      if(liveTodoIds.has(t.id)) continue;
+      const r = R.todos.get(t.id);
+      if(r && r.deleted && r.updatedAt >= t.at) continue;
+      if(r && !r.deleted && r.updatedAt > t.at) continue;
+      ops.push(['todos', t.id, { id: t.id, _deleted: true, updatedAt: t.at }]);
+    }
+
     const rf = R.folders;
     if(!rf || (L.foldersAt > rf.updatedAt && JSON.stringify(rf.list) !== JSON.stringify(L.folders)))
       ops.push(['meta', 'folders', { list: L.folders.slice(), updatedAt: L.foldersAt || Date.now() }]);
+    const rc = R.todoCats;
+    if(!rc || (L.todoCatsAt > rc.updatedAt && JSON.stringify(rc.list) !== JSON.stringify(L.todoCats)))
+      ops.push(['meta', 'todocats', { list: L.todoCats.slice(), updatedAt: L.todoCatsAt || Date.now() }]);
     return ops;
   }
 
   // 원격 상태표에 넣을 요약 (문서 1개)
   function remoteEntry(col, data){
     if(col === 'items') return { updatedAt: String(data.updatedAt || ''), sig: data._deleted ? '' : itemSig(data), deleted: !!data._deleted };
+    if(col === 'todos') return { updatedAt: Number(data.updatedAt) || 0, sig: data._deleted ? '' : todoSig(data), deleted: !!data._deleted };
     return { updatedAt: Number(data.updatedAt) || 0, sig: data._deleted ? '' : memoSig(data), deleted: !!data._deleted };
   }
 
-  return { hash64, itemKey, itemDoc, itemSig, memoSig, applyItems, applyMemos, planPush, remoteEntry };
+  return { hash64, itemKey, itemDoc, itemSig, memoSig, todoSig, applyItems, applyMemos, applyTodos, planPush, remoteEntry };
 })();
 
 /* ---------- Firebase 연결 (화면·SDK) ---------- */
@@ -884,10 +1017,13 @@ const fb = {
   lastFoldersJson: ''
 };
 const FB_FOLDERS_AT = 'linkarchive-folders-at';
+const FB_TODOCATS_AT = 'linkarchive-todocats-at';
 function fbActive(){ return !!(fb.user && fb.db); }
-function fbConnected(){ return fbActive() && fb.synced.items && fb.synced.memos && fb.synced.folders; }
+function fbConnected(){ return fbActive() && fb.synced.items && fb.synced.memos && fb.synced.folders && fb.synced.todos && fb.synced.todocats; }
 function foldersAt(){ return Number(localStorage.getItem(FB_FOLDERS_AT)) || 0; }
 function setFoldersAt(t){ try{ localStorage.setItem(FB_FOLDERS_AT, String(t)); }catch(e){} }
+function todoCatsAt(){ return Number(localStorage.getItem(FB_TODOCATS_AT)) || 0; }
+function setTodoCatsAt(t){ try{ localStorage.setItem(FB_TODOCATS_AT, String(t)); }catch(e){} }
 // persistAll 이 부를 때마다 폴더가 바뀌었는지 스스로 알아챈다 (폴더를 고치는 곳을 일일이 건드리지 않기 위해)
 function fbNoteFolders(){
   const j = JSON.stringify(folders);
@@ -945,8 +1081,8 @@ async function fbLogout(){
 function fbStart(user){
   fbStop(true);
   fb.user = user; fb.db = firebase.firestore();
-  fb.remote = { items: new Map(), memos: new Map(), folders: null };
-  fb.synced = { items: false, memos: false, folders: false };
+  fb.remote = { items: new Map(), memos: new Map(), todos: new Map(), folders: null, todoCats: null };
+  fb.synced = { items: false, memos: false, todos: false, folders: false, todocats: false };
   fb.initialDone = false; fb.error = '';
   settings.fbWanted = true; save(LS.settings, settings);   // 다음에 앱을 열면 GitHub 동기화는 건너뛴다
   clearTimeout(syncTimer);                                  // 예약돼 있던 GitHub 업로드 취소
@@ -955,7 +1091,9 @@ function fbStart(user){
   const opt = { includeMetadataChanges: true };
   fb.unsubs.push(base.collection('items').onSnapshot(opt, fbOnItems, fbListenFail));
   fb.unsubs.push(base.collection('memos').onSnapshot(opt, fbOnMemos, fbListenFail));
+  fb.unsubs.push(base.collection('todos').onSnapshot(opt, fbOnTodos, fbListenFail));
   fb.unsubs.push(base.collection('meta').doc('folders').onSnapshot(opt, fbOnFolders, fbListenFail));
+  fb.unsubs.push(base.collection('meta').doc('todocats').onSnapshot(opt, fbOnTodoCats, fbListenFail));
 }
 function fbStop(quiet){
   fb.unsubs.forEach(u=>{ try{ u(); }catch(e){} });
@@ -1006,6 +1144,51 @@ function fbOnMemos(snap){
   }
   fbAfterSnapshot('memos', snap);
 }
+function fbOnTodos(snap){
+  const docs = [];
+  snap.docChanges().forEach(ch=>{
+    if(ch.type === 'removed'){ fb.remote.todos.delete(ch.doc.id); return; }
+    const d = ch.doc.data();
+    fb.remote.todos.set(ch.doc.id, FBCore.remoteEntry('todos', d));
+    docs.push({ data: d });
+  });
+  if(docs.length){
+    const editing = document.getElementById('item-modal').classList.contains('on') ? editTodoId : null;
+    const r = FBCore.applyTodos(todos, tombs.todos, docs, editing);
+    if(r.changed){
+      todos = r.todos; tombs.todos = r.tombsTodos;
+      save(LS.todos, todos); save(LS.tombs, tombs);
+      updateTodoBadge();
+      if(document.getElementById('view-todo').classList.contains('active')) renderTodoView();
+    }
+    if(r.localNewer) fbSchedulePush();
+  }
+  fbAfterSnapshot('todos', snap);
+}
+function fbOnTodoCats(snap){
+  const d = snap.exists ? snap.data() : null;
+  fb.remote.todoCats = d ? { list: Array.isArray(d.list) ? d.list.map(String) : [], updatedAt: Number(d.updatedAt) || 0 } : null;
+  if(snap.metadata.fromCache && !fb.synced.todocats) return;
+  const rc = fb.remote.todoCats;
+  if(!fb.synced.todocats){
+    // 처음 연결될 때는 양쪽을 합친다 (어느 기기의 카테고리도 잃지 않도록)
+    const merged = rc ? rc.list.slice() : [];
+    todoCats.forEach(c=>{ if(!merged.includes(c)) merged.push(c); });
+    const same = rc && JSON.stringify(merged) === JSON.stringify(rc.list);
+    if(JSON.stringify(merged) !== JSON.stringify(todoCats)){
+      todoCats = merged; save(LS.todoCats, todoCats);
+      if(document.getElementById('view-todo').classList.contains('active')) renderTodoView();
+    }
+    setTodoCatsAt(same ? rc.updatedAt : Date.now());
+  }else if(rc && rc.updatedAt > todoCatsAt()){
+    todoCats = rc.list.slice(); save(LS.todoCats, todoCats);
+    setTodoCatsAt(rc.updatedAt);
+    if(document.getElementById('view-todo').classList.contains('active')) renderTodoView();
+  }else if(!rc || todoCatsAt() > rc.updatedAt){
+    fbSchedulePush();
+  }
+  fbAfterSnapshot('todocats', snap);
+}
 function fbOnFolders(snap){
   const d = snap.exists ? snap.data() : null;
   fb.remote.folders = d ? { list: Array.isArray(d.list) ? d.list.map(String) : [], updatedAt: Number(d.updatedAt) || 0 } : null;
@@ -1048,6 +1231,8 @@ function fbAfterSnapshot(col, snap){
 function fbRerender(changedMemoIds){
   if(document.getElementById('view-archive').classList.contains('active')) renderArchive();
   if(document.getElementById('view-memo').classList.contains('active')) renderMemoView();
+  if(document.getElementById('view-todo').classList.contains('active')) renderTodoView();
+  updateTodoBadge();
   if(inMemoEditor()){
     if(!curMemo()){ curMemoId = null; showView('memo'); toast('다른 기기에서 이 메모를 지웠어요'); }
     else if(changedMemoIds.includes(curMemoId) && Date.now() - memoTypingAt > 4000) renderMemoEditor();
@@ -1065,7 +1250,8 @@ async function fbPushNow(manual){
   if(!fbConnected()){ if(manual) toast('아직 연결 중이에요…'); return; }
   if(fb.pushing){ fb.pushAgain = true; return; }
   if(inMemoEditor()) saveMemoEdits();
-  const ops = FBCore.planPush({ items, tombsItems: tombs.items, memos, tombsMemos: tombs.memos, folders, foldersAt: foldersAt() }, fb.remote);
+  const ops = FBCore.planPush({ items, tombsItems: tombs.items, memos, tombsMemos: tombs.memos,
+    todos, tombsTodos: tombs.todos, folders, foldersAt: foldersAt(), todoCats, todoCatsAt: todoCatsAt() }, fb.remote);
   if(!ops.length){
     if(manual) toast('☁️ 실시간 연결 중 · 링크 ' + items.length + '개 · 메모 ' + memos.filter(m=>!m.deleted).length + '개');
     return;
@@ -1155,7 +1341,7 @@ function renderFbStatus(){
     el.innerHTML = (fb.error ? '🔴 <b>문제 있음</b> — ' + esc(fb.error)
                   : fbConnected() ? '🟢 <b>실시간 연결됨</b>' : '⏳ 연결 중…')
       + '<br>계정: ' + esc(fb.user.email || '(이메일 없음)')
-      + '<br>이 기기: 링크 ' + items.length + '개 · 메모 ' + memos.filter(m=>!m.deleted).length + '개'
+      + '<br>이 기기: 링크 ' + items.length + '개 · 메모 ' + memos.filter(m=>!m.deleted).length + '개 · 할 일 ' + todos.filter(t=>!t.trashed).length + '개'
       + (fb.lastAt ? ' · 마지막 반영 ' + new Date(fb.lastAt).toLocaleTimeString('ko-KR') : '')
       + '<br>이 기기에서는 아래 GitHub 동기화가 쉬고 있어요';
     inBtn.style.display = 'none'; outBtn.style.display = '';
@@ -1170,8 +1356,9 @@ function renderFbStatus(){
 /* ============================================================
    상태 및 저장소
    ============================================================ */
-const LS = { items:'linkarchive-items', folders:'linkarchive-folders', settings:'linkarchive-settings', tombs:'linkarchive-tombs', memos:'linkarchive-memos' };
+const LS = { items:'linkarchive-items', folders:'linkarchive-folders', settings:'linkarchive-settings', tombs:'linkarchive-tombs', memos:'linkarchive-memos', todos:'linkarchive-todos', todoCats:'linkarchive-todocats' };
 
+const DEFAULT_TODO_CATS = ['치료준비','서류','공부','집안일','개인'];  // 할 일 전용 카테고리 (링크 폴더와 별개)
 const DEFAULT_FOLDERS = ['작업치료','이스포츠 기획','영양제 정보','생활/주방용품','일반 참고자료'];
 const DEFAULT_MODELS = { gemini:'gemini-2.5-flash', claude:'claude-haiku-4-5-20251001', openai:'gpt-4o-mini' };
 
@@ -1179,10 +1366,13 @@ let items    = load(LS.items, []);          // 저장된 링크 [{id,url,title,f
 let folders  = load(LS.folders, DEFAULT_FOLDERS.slice());
 let settings = load(LS.settings, { provider:'gemini', apiKey:'', model:'' });
 let memos    = load(LS.memos, []);          // 메모 [{id,title,body,tags,autoTags,todos,summary,pinned,archived,deleted,createdAt,updatedAt}]
-let tombs    = load(LS.tombs, { items:[], folders:[], memos:[] }); // 삭제 기록 — 동기화 시 다른 기기에도 삭제를 전파
+let todos    = load(LS.todos, []);          // 할 일 [{id,text,cat,due,star,note,done,doneAt,trashed,trashedAt,createdAt,updatedAt}]
+let todoCats = load(LS.todoCats, DEFAULT_TODO_CATS.slice());  // 할 일 전용 카테고리 (링크 폴더와 별개)
+let tombs    = load(LS.tombs, { items:[], folders:[], memos:[], todos:[] }); // 삭제 기록 — 동기화 시 다른 기기에도 삭제를 전파
 let pending  = [];                          // 검토 대기 중인 링크
 let currentFilter = '전체';
 if(!Array.isArray(tombs.memos)) tombs.memos = [];   // 예전 버전에서 올라온 기록 보정
+if(!Array.isArray(tombs.todos)) tombs.todos = [];
 
 function load(key, fallback){
   try{ const v = localStorage.getItem(key); return v ? JSON.parse(v) : fallback; }
@@ -1190,7 +1380,7 @@ function load(key, fallback){
 }
 function save(key, val){ localStorage.setItem(key, JSON.stringify(val)); }
 function persistAll(){
-  save(LS.items, items); save(LS.folders, folders); save(LS.tombs, tombs); save(LS.memos, memos);
+  save(LS.items, items); save(LS.folders, folders); save(LS.tombs, tombs); save(LS.memos, memos); save(LS.todos, todos);
   fbNoteFolders(); fbSchedulePush();   // 실시간 동기화 (로그인돼 있을 때만 동작)
   scheduleSync(); // 변경이 있으면 잠시 후 자동 동기화 (GitHub — 실시간 동기화 중에는 쉰다)
 }
@@ -1207,6 +1397,7 @@ function showView(name){
   if(name==='review') renderReview();
   if(name==='archive') renderArchive();
   if(name==='memo') renderMemoView();
+  if(name==='todo') renderTodoView();
   document.getElementById('memo-fab').style.display = (name==='memo') ? '' : 'none';
 }
 function toast(msg){
@@ -2269,6 +2460,401 @@ function memoLinksToArchive(){
 }
 
 /* ============================================================
+   6. 할 일 (TO DO)
+   - 체크하면 '완료함' → 7일 뒤 휴지통 → 30일 뒤 영구 삭제 (되살리기 가능)
+   - 카테고리는 링크·메모의 폴더와 별개로 관리한다
+   - 메모 안의 할 일과는 완전히 분리된 기능이다
+   ============================================================ */
+const TODO_DONE_DAYS = 7;    // 완료함 → 휴지통
+const TODO_TRASH_DAYS = 30;  // 휴지통 → 영구 삭제
+
+// 다른 기기(또는 예전 버전)에서 온 할 일에 빠진 칸이 있어도 앱이 깨지지 않게 채워 준다
+function normalizeTodo(t){
+  if(!t || !t.id) return null;
+  const at = Number(t.updatedAt) || Number(t.createdAt) || Date.now();
+  return {
+    id: String(t.id),
+    text: String(t.text || ''),
+    cat: String(t.cat || ''),
+    due: /^\d{4}-\d{2}-\d{2}$/.test(t.due || '') ? t.due : '',
+    star: !!t.star,
+    note: String(t.note || ''),
+    done: !!t.done, doneAt: Number(t.doneAt) || 0,
+    trashed: !!t.trashed, trashedAt: Number(t.trashedAt) || 0,
+    createdAt: Number(t.createdAt) || at,
+    updatedAt: at
+  };
+}
+
+/* ---------- 순수 로직 (화면과 무관 — 테스트 대상) ---------- */
+const TodoCore = (function(){
+  const DAY = 86400000;
+  const pad = n => String(n).padStart(2, '0');
+  // 기기의 날짜 기준 YYYY-MM-DD (UTC로 바꾸면 하루가 밀려서 직접 만든다)
+  function dayStr(ts){ const d = new Date(ts); return d.getFullYear() + '-' + pad(d.getMonth()+1) + '-' + pad(d.getDate()); }
+  function addDays(str, n){
+    const p = str.split('-').map(Number);
+    const d = new Date(p[0], p[1]-1, p[2] + n);
+    return dayStr(d.getTime());
+  }
+  // 마감 상태: 지난 것 / 오늘 / 곧(7일 이내) / 나중
+  function dueState(due, now){
+    if(!due) return '';
+    const today = dayStr(now);
+    if(due < today) return 'over';
+    if(due === today) return 'today';
+    return due <= addDays(today, 7) ? 'soon' : 'later';
+  }
+  function dueLabel(due, now){
+    if(!due) return '';
+    const today = dayStr(now), st = dueState(due, now);
+    if(st === 'today') return '오늘';
+    if(due === addDays(today, 1)) return '내일';
+    if(due === addDays(today, -1)) return '어제';
+    const p = due.split('-');
+    const base = Number(p[1]) + '월 ' + Number(p[2]) + '일';
+    return st === 'over' ? base + ' 지남' : base;
+  }
+
+  function newTodo(cat){
+    const now = Date.now();
+    return { id: 't' + now + Math.random().toString(36).slice(2,7), text:'', cat: cat || '',
+             due:'', star:false, note:'', done:false, doneAt:0, trashed:false, trashedAt:0,
+             createdAt: now, updatedAt: now };
+  }
+
+  // 보기별 목록 (all=남은 것, today=지난+오늘, week=7일 이내, star=중요, done=완료함, trash=휴지통)
+  function byView(todos, view, now){
+    if(view === 'trash') return todos.filter(t => t.trashed);
+    if(view === 'done')  return todos.filter(t => t.done && !t.trashed);
+    const live = todos.filter(t => !t.done && !t.trashed);
+    const today = dayStr(now);
+    if(view === 'today') return live.filter(t => t.due && t.due <= today);
+    if(view === 'week')  return live.filter(t => t.due && t.due <= addDays(today, 7));
+    if(view === 'star')  return live.filter(t => t.star);
+    return live;
+  }
+  // 정렬: 중요 먼저 → 마감 빠른 순(없으면 뒤) → 최근에 만든 순
+  //       완료함·휴지통은 최근에 처리한 순
+  function sortTodos(list, view){
+    const c = list.slice();
+    if(view === 'done')  return c.sort((a,b) => (b.doneAt||0) - (a.doneAt||0));
+    if(view === 'trash') return c.sort((a,b) => (b.trashedAt||0) - (a.trashedAt||0));
+    return c.sort((a,b) =>
+      (b.star?1:0) - (a.star?1:0) ||
+      ((a.due?0:1) - (b.due?0:1)) ||
+      (a.due && b.due ? a.due.localeCompare(b.due) : 0) ||
+      (b.createdAt||0) - (a.createdAt||0));
+  }
+  function search(list, q){
+    const s = (q||'').trim().toLowerCase();
+    if(!s) return list;
+    const terms = s.split(/\s+/);
+    return list.filter(t => {
+      const hay = (t.text + ' ' + t.note + ' ' + t.cat).toLowerCase();
+      return terms.every(w => hay.includes(w));
+    });
+  }
+  // 탭 뱃지: 오늘까지 해야 할 것(지난 것 + 오늘)
+  function urgentCount(todos, now){
+    const today = dayStr(now);
+    return todos.filter(t => !t.done && !t.trashed && t.due && t.due <= today).length;
+  }
+
+  /* 시간이 지난 것들을 정리한다 — 완료함 7일 뒤 휴지통으로, 휴지통 30일 뒤 영구 삭제
+     반환: 새 목록, 새로 생긴 삭제기록, 무엇이 바뀌었는지 */
+  function sweep(todos, now, doneDays, trashDays){
+    const dMs = (doneDays == null ? TODO_DONE_DAYS : doneDays) * DAY;
+    const tMs = (trashDays == null ? TODO_TRASH_DAYS : trashDays) * DAY;
+    const out = [], tombs = [];
+    let moved = 0, purged = 0;
+    for(const t of todos){
+      if(t.trashed && t.trashedAt && now - t.trashedAt >= tMs){
+        tombs.push({ id: t.id, at: now }); purged++; continue;
+      }
+      if(t.done && !t.trashed && t.doneAt && now - t.doneAt >= dMs){
+        out.push(Object.assign({}, t, { trashed:true, trashedAt: now, updatedAt: now })); moved++; continue;
+      }
+      out.push(t);
+    }
+    return { todos: out, tombs, moved, purged, changed: !!(moved || purged) };
+  }
+
+  return { dayStr, addDays, dueState, dueLabel, newTodo, byView, sortTodos, search, urgentCount, sweep };
+})();
+
+/* ---------- 화면 ---------- */
+let todoView = 'all';
+let todoCat = '전체';
+let editTodoId = null;
+
+function todoCatOf(t){ return todoCats.includes(t.cat) ? t.cat : ''; }   // 지워진 카테고리는 미분류로
+function curTodo(){ return todos.find(t => t.id === editTodoId) || null; }
+
+function renderTodoView(){ sweepTodos(); renderTodoFilter(); renderTodoCatFilter(); renderTodoList(); }
+
+function renderTodoFilter(){
+  const now = Date.now();
+  const live = todos.filter(t => !t.done && !t.trashed);
+  const today = TodoCore.dayStr(now);
+  const base = [
+    ['all',   '전체 ' + live.length],
+    ['today', '오늘까지 ' + live.filter(t => t.due && t.due <= today).length],
+    ['week',  '이번 주 ' + live.filter(t => t.due && t.due <= TodoCore.addDays(today, 7)).length],
+    ['star',  '⭐ 중요 ' + live.filter(t => t.star).length],
+    ['done',  '✅ 완료함 ' + todos.filter(t => t.done && !t.trashed).length],
+    ['trash', '🗑️ 휴지통 ' + todos.filter(t => t.trashed).length]
+  ];
+  document.getElementById('todo-filter').innerHTML = base.map(b =>
+    '<button class="chip ' + (todoView===b[0]?'on':'') + '" onclick="setTodoView(\'' + b[0] + '\')">' + esc(b[1]) + '</button>').join('');
+}
+function renderTodoCatFilter(){
+  const pool = TodoCore.byView(todos, todoView, Date.now());
+  const counts = {}; let none = 0;
+  pool.forEach(t => { const c = todoCatOf(t); if(c) counts[c] = (counts[c]||0)+1; else none++; });
+  let html = '<button class="chip ' + (todoCat==='전체'?'on':'') + '" onclick="setTodoCat(\'전체\')">전체 ' + pool.length + '</button>';
+  html += todoCats.map(c =>
+    '<button class="chip ' + (todoCat===c?'on':'') + '" data-c="' + esc(c) + '" onclick="setTodoCat(this.dataset.c)">' +
+    esc(c) + ' ' + (counts[c]||0) + '</button>').join('');
+  html += '<button class="chip ' + (todoCat===''?'on':'') + '" onclick="setTodoCat(\'\')">미분류 ' + none + '</button>';
+  document.getElementById('todo-cat-filter').innerHTML = html;
+}
+function setTodoView(v){ todoView = v; renderTodoView(); }
+function setTodoCat(c){ todoCat = c; renderTodoCatFilter(); renderTodoList(); }
+
+function renderTodoList(){
+  const now = Date.now();
+  let list = TodoCore.byView(todos, todoView, now);
+  if(todoCat !== '전체') list = list.filter(t => todoCatOf(t) === todoCat);
+  list = TodoCore.sortTodos(TodoCore.search(list, document.getElementById('todo-search').value), todoView);
+
+  document.getElementById('todo-empty-trash').style.display =
+    (todoView === 'trash' && todos.some(t => t.trashed)) ? '' : 'none';
+
+  const el = document.getElementById('todo-list');
+  if(!list.length){
+    const why = todoView === 'done' ? '아직 끝낸 할 일이 없어요'
+      : todoView === 'trash' ? '휴지통이 비어 있어요'
+      : todoView === 'today' ? '오늘까지 할 일이 없어요 👍'
+      : todoView === 'week' ? '이번 주에 할 일이 없어요'
+      : todoView === 'star' ? '중요 표시한 할 일이 없어요'
+      : todoCat !== '전체' ? '이 카테고리에는 할 일이 없어요'
+      : '할 일이 없어요<br>위에 한 줄 쓰고 Enter 를 눌러보세요';
+    el.innerHTML = '<div class="empty"><span class="big">✅</span>' + why + '</div>';
+    return;
+  }
+  el.innerHTML = list.map(t => {
+    const st = TodoCore.dueState(t.due, now);
+    const cat = todoCatOf(t);
+    const meta = (t.due ? '<span class="due ' + st + '">' + esc(TodoCore.dueLabel(t.due, now)) + '</span>' : '')
+      + (cat ? '<span class="folder-tag">' + esc(cat) + '</span>' : '')
+      + (t.trashed ? '<span class="due">🗑️ 휴지통</span>' : t.done ? '<span class="due">✅ 완료</span>' : '');
+    return '<div class="todo-item ' + (t.done?'done':'') + '">' +
+      '<input type="checkbox" ' + (t.done?'checked':'') + ' data-id="' + t.id + '"' +
+        ' onchange="toggleTodoDone(this.dataset.id, this.checked)" title="다 했으면 체크">' +
+      '<div class="todo-main" data-id="' + t.id + '" onclick="openTodoEdit(this.dataset.id)">' +
+        '<div class="todo-text">' + esc(t.text) + '</div>' +
+        (t.note ? '<div class="todo-note">' + esc(t.note) + '</div>' : '') +
+        (meta ? '<div class="todo-meta">' + meta + '</div>' : '') +
+      '</div>' +
+      '<button class="star-btn ' + (t.star?'on':'') + '" data-id="' + t.id + '"' +
+        ' onclick="event.stopPropagation();toggleTodoStar(this.dataset.id)" title="중요">⭐</button>' +
+    '</div>';
+  }).join('');
+}
+
+function onTodoKey(e){ if(e.key === 'Enter'){ e.preventDefault(); addTodo(); } }
+function addTodo(){
+  const el = document.getElementById('todo-input');
+  const text = el.value.trim();
+  if(!text){ toast('할 일을 입력해 주세요'); return; }
+  const t = TodoCore.newTodo(todoCat === '전체' ? '' : todoCat);   // 보고 있던 카테고리로 들어간다
+  t.text = text;
+  todos.unshift(t);
+  el.value = '';
+  persistAll(); updateTodoBadge(); renderTodoView();
+}
+function touchTodo(t){ t.updatedAt = Date.now(); persistAll(); updateTodoBadge(); }
+
+function toggleTodoDone(id, done){
+  const t = todos.find(x => x.id === id); if(!t) return;
+  t.done = done;
+  t.doneAt = done ? Date.now() : 0;
+  if(!done && t.trashed){ t.trashed = false; t.trashedAt = 0; }   // 휴지통에서 체크를 풀면 되살아난다
+  touchTodo(t); renderTodoView();
+  toast(done ? '✅ 완료! ' + TODO_DONE_DAYS + '일 뒤 휴지통으로 갑니다' : '다시 할 일로 되돌렸어요');
+}
+function toggleTodoStar(id){
+  const t = todos.find(x => x.id === id); if(!t) return;
+  t.star = !t.star;
+  touchTodo(t); renderTodoList();
+}
+
+function openTodoEdit(id){
+  const t = todos.find(x => x.id === id); if(!t) return;
+  editTodoId = id;
+  document.getElementById('item-modal-body').innerHTML =
+    '<h2>✅ 할 일 <button onclick="closeModal(\'item-modal\')">✕</button></h2>' +
+    '<div class="field"><label>할 일</label><input id="td-text" type="text" value="' + esc(t.text) + '"></div>' +
+    '<div class="field"><label>카테고리</label><div class="chip-row" id="td-cats"></div></div>' +
+    '<div class="field"><label>마감날</label>' +
+      '<div style="display:flex;gap:6px;flex-wrap:wrap">' +
+        '<input id="td-due" type="date" value="' + t.due + '" style="flex:1;min-width:150px">' +
+        '<button class="mini-btn" onclick="setTodoDueQuick(0)">오늘</button>' +
+        '<button class="mini-btn" onclick="setTodoDueQuick(1)">내일</button>' +
+        '<button class="mini-btn" onclick="setTodoDueQuick(7)">다음 주</button>' +
+        '<button class="mini-btn" onclick="setTodoDueQuick(null)">지우기</button>' +
+      '</div></div>' +
+    '<div class="field"><label>메모 한 줄</label><input id="td-note" type="text" value="' + esc(t.note) + '" placeholder="없으면 비워 두세요"></div>' +
+    '<div style="display:flex;align-items:center;gap:10px;margin:2px 0 14px">' +
+      '<input id="td-star" type="checkbox" ' + (t.star?'checked':'') + ' style="width:20px;height:20px;flex-shrink:0">' +
+      '<label for="td-star" style="margin:0;font-size:.9rem;color:var(--text)">⭐ 중요 — 목록 맨 위에 둡니다</label>' +
+    '</div>' +
+    '<button class="btn btn-primary" onclick="applyTodoEdit()">저장</button>' +
+    (t.trashed
+      ? '<button class="btn btn-outline" onclick="restoreTodo()">↩️ 휴지통에서 되살리기</button>' +
+        '<button class="menu-item red" style="border:none;text-align:center;margin-top:6px" onclick="purgeTodo()">🗑️ 완전히 삭제 (모든 기기에서)</button>'
+      : '<button class="menu-item red" style="border:none;text-align:center;margin-top:6px" onclick="trashTodo()">🗑️ 휴지통으로</button>');
+  renderTodoEditCats();
+  document.getElementById('item-modal').classList.add('on');
+}
+function renderTodoEditCats(){
+  const t = curTodo(); if(!t) return;
+  const cur = todoCatOf(t);
+  document.getElementById('td-cats').innerHTML =
+    '<button class="chip ' + (cur===''?'on':'') + '" onclick="pickTodoCat(\'\')">미분류</button>' +
+    todoCats.map(c => '<button class="chip ' + (cur===c?'on':'') + '" data-c="' + esc(c) +
+      '" onclick="pickTodoCat(this.dataset.c)">' + esc(c) + '</button>').join('');
+}
+function pickTodoCat(c){
+  const t = curTodo(); if(!t) return;
+  t.cat = c; touchTodo(t); renderTodoEditCats();
+}
+function setTodoDueQuick(days){
+  const el = document.getElementById('td-due');
+  el.value = (days == null) ? '' : TodoCore.addDays(TodoCore.dayStr(Date.now()), days);
+}
+function applyTodoEdit(){
+  const t = curTodo(); if(!t) return;
+  const text = document.getElementById('td-text').value.trim();
+  if(!text){ toast('할 일 내용을 비워 둘 수는 없어요'); return; }
+  t.text = text;
+  t.due = document.getElementById('td-due').value || '';
+  t.note = document.getElementById('td-note').value.trim();
+  t.star = document.getElementById('td-star').checked;
+  touchTodo(t);
+  closeModal('item-modal'); renderTodoView();
+  toast('저장했어요');
+}
+function trashTodo(){
+  const t = curTodo(); if(!t) return;
+  t.trashed = true; t.trashedAt = Date.now();
+  touchTodo(t);
+  closeModal('item-modal'); renderTodoView();
+  toast('휴지통으로 보냈어요 — ' + TODO_TRASH_DAYS + '일 안에는 되살릴 수 있어요');
+}
+function restoreTodo(){
+  const t = curTodo(); if(!t) return;
+  t.trashed = false; t.trashedAt = 0;
+  if(t.done && Date.now() - t.doneAt >= TODO_DONE_DAYS * 86400000) t.doneAt = Date.now(); // 바로 다시 내려가지 않게
+  touchTodo(t);
+  closeModal('item-modal'); renderTodoView();
+  toast('되살렸어요');
+}
+function purgeTodo(){
+  const t = curTodo(); if(!t) return;
+  if(!confirm('이 할 일을 완전히 지울까요?\n동기화된 다른 기기에서도 사라집니다.')) return;
+  tombs.todos.push({ id: t.id, at: Date.now() });   // 다른 기기에도 삭제 전파
+  todos = todos.filter(x => x.id !== t.id);
+  editTodoId = null;
+  persistAll(); updateTodoBadge();
+  closeModal('item-modal'); renderTodoView();
+  toast('완전히 삭제했어요');
+}
+function emptyTodoTrash(){
+  const gone = todos.filter(t => t.trashed);
+  if(!gone.length){ toast('휴지통이 비어 있어요'); return; }
+  if(!confirm('휴지통의 할 일 ' + gone.length + '개를 완전히 지울까요?\n동기화된 다른 기기에서도 사라집니다.')) return;
+  const at = Date.now();
+  gone.forEach(t => tombs.todos.push({ id: t.id, at }));
+  todos = todos.filter(t => !t.trashed);
+  persistAll(); updateTodoBadge(); renderTodoView();
+  toast('휴지통을 비웠어요 (' + gone.length + '개)');
+}
+
+/* 시간이 지난 할 일 정리 — 앱을 열 때, 할 일 화면을 그릴 때, 한 시간마다 */
+function sweepTodos(){
+  const r = TodoCore.sweep(todos, Date.now(), TODO_DONE_DAYS, TODO_TRASH_DAYS);
+  if(!r.changed) return;
+  todos = r.todos;
+  r.tombs.forEach(t => tombs.todos.push(t));
+  persistAll(); updateTodoBadge();
+}
+function updateTodoBadge(){
+  const b = document.getElementById('todo-badge');
+  if(!b) return;
+  const n = TodoCore.urgentCount(todos, Date.now());
+  b.textContent = n;
+  b.style.display = n ? '' : 'none';
+}
+
+/* ---------- 할 일 카테고리 관리 ---------- */
+function openTodoCatManager(){
+  renderTodoCatManager();
+  document.getElementById('todocat-modal').classList.add('on');
+}
+function renderTodoCatManager(){
+  const counts = {};
+  todos.filter(t => !t.trashed).forEach(t => { if(t.cat) counts[t.cat] = (counts[t.cat]||0)+1; });
+  document.getElementById('todocat-manage-list').innerHTML = todoCats.map((c, i) =>
+    '<div class="folder-row"><span>' + esc(c) + ' <small>(할 일 ' + (counts[c]||0) + ')</small></span>' +
+    '<button class="mini-btn" onclick="renameTodoCat(' + i + ')">이름변경</button>' +
+    '<button class="mini-btn red" onclick="deleteTodoCat(' + i + ')">삭제</button></div>').join('')
+    || '<p class="hint" style="text-align:left">카테고리가 없어요. 아래에서 추가하세요.</p>';
+}
+function addTodoCat(){
+  const input = document.getElementById('new-todocat-name');
+  const name = input.value.trim();
+  if(!name){ toast('카테고리 이름을 입력하세요'); return; }
+  if(todoCats.includes(name)){ toast('이미 있는 카테고리예요'); return; }
+  todoCats.push(name);
+  input.value = '';
+  saveTodoCats();
+  renderTodoCatManager(); renderTodoView();
+  toast('\'' + name + '\' 카테고리를 만들었어요');
+}
+function renameTodoCat(i){
+  const oldName = todoCats[i];
+  const name = prompt('새 카테고리 이름', oldName);
+  if(!name || name.trim() === oldName) return;
+  const newName = name.trim();
+  if(todoCats.includes(newName)){ toast('이미 있는 카테고리예요'); return; }
+  todoCats[i] = newName;
+  const now = Date.now();
+  todos.forEach(t => { if(t.cat === oldName){ t.cat = newName; t.updatedAt = now; } });
+  if(todoCat === oldName) todoCat = newName;
+  saveTodoCats(); persistAll();
+  renderTodoCatManager(); renderTodoView();
+}
+function deleteTodoCat(i){
+  const name = todoCats[i];
+  const count = todos.filter(t => !t.trashed && t.cat === name).length;
+  if(!confirm('\'' + name + '\' 카테고리를 삭제할까요?' + (count ? '\n안에 있던 할 일 ' + count + '개는 미분류로 갑니다.' : ''))) return;
+  todoCats.splice(i, 1);
+  const now = Date.now();
+  todos.forEach(t => { if(t.cat === name){ t.cat = ''; t.updatedAt = now; } });
+  if(todoCat === name) todoCat = '전체';
+  saveTodoCats(); persistAll();
+  renderTodoCatManager(); renderTodoView();
+  toast('카테고리를 삭제했어요');
+}
+function saveTodoCats(){
+  save(LS.todoCats, todoCats);
+  setTodoCatsAt(Date.now());
+  fbSchedulePush();
+}
+
+/* ============================================================
    폴더 관리 (추가 / 이름변경 / 삭제)
    ============================================================ */
 function openFolderManager(){
@@ -2423,7 +3009,7 @@ function exportData(){
     '[확인] 넣기 — 나중에 이 파일 하나로 전부 복구됩니다\n' +
     '[취소] 링크만 넣기\n\n' +
     '※ 넣을 경우 파일에 비밀 값이 들어가니 남에게 주지 마세요.');
-  const payload = { items, folders, memos, tombs, savedAt: new Date().toISOString() };
+  const payload = { items, folders, memos, todos, todoCats, tombs, savedAt: new Date().toISOString() };
   if(withKeys){
     payload.settings = {
       ghToken: settings.ghToken || '', gistId: settings.gistId || '',
@@ -2460,6 +3046,19 @@ function importData(e){
         else if((m.updatedAt||0) > (p.updatedAt||0)) byId.set(m.id, m);
       }
       memos = [...byId.values()].sort((a,b)=>(b.updatedAt||0)-(a.updatedAt||0));
+      // 할 일 병합 — 같은 id는 더 최근에 고친 쪽을 남긴다
+      let addedTodo = 0;
+      const tById = new Map(todos.map(t=>[t.id, t]));
+      for(const raw of (data.todos||[])){
+        const t = normalizeTodo(raw); if(!t) continue;
+        const prev = tById.get(t.id);
+        if(!prev){ tById.set(t.id, t); addedTodo++; }
+        else if((t.updatedAt||0) > (prev.updatedAt||0)) tById.set(t.id, t);
+      }
+      todos = [...tById.values()];
+      let catAdded = false;
+      for(const c of (data.todoCats||[])){ if(!todoCats.includes(c)){ todoCats.push(c); catAdded = true; } }
+      if(catAdded) saveTodoCats();
       // 백업에 토큰이 들어 있으면 복구할지 물어본다
       let restored = false;
       if(data.settings && (data.settings.ghToken || data.settings.apiKey)){
@@ -2470,8 +3069,8 @@ function importData(e){
           restored = true;
         }
       }
-      persistAll(); renderArchive(); renderMemoView();
-      toast(`가져오기 완료 (새 링크 ${added}개 · 새 메모 ${addedMemo}개)` + (restored ? ' · 토큰 복구됨' : ''));
+      persistAll(); renderArchive(); renderMemoView(); renderTodoView(); updateTodoBadge();
+      toast(`가져오기 완료 (새 링크 ${added}개 · 새 메모 ${addedMemo}개 · 새 할 일 ${addedTodo}개)` + (restored ? ' · 토큰 복구됨' : ''));
       if(restored) syncNow(true);
     }catch(err){ toast('백업 파일을 읽지 못했어요'); }
   };
@@ -2825,7 +3424,7 @@ function renderSyncStatus(){
    오래된 서비스워커가 남아 있으면 GitHub 통신이 막히는 문제가 있었다.
    그래서 버전을 확인해 다르면 한 번만 자동으로 완전 새로고침한다.
    ============================================================ */
-const SW_EXPECTED = 'linkarchive-v22';
+const SW_EXPECTED = 'linkarchive-v23';
 
 // 실행 중인 서비스워커의 버전을 물어본다
 async function swVersion(){
@@ -2907,6 +3506,9 @@ async function runDiagnostics(){
 
 ensurePersistentStorage();
 updateBadge();
+sweepTodos();          // 완료 7일 → 휴지통, 휴지통 30일 → 영구 삭제
+updateTodoBadge();
+setInterval(()=>{ sweepTodos(); updateTodoBadge(); }, 3600000);   // 한 시간마다 다시 확인
 setCloudIcon('☁️');
 if(settings.ghToken && !settings.fbWanted) syncNow(false); // 앱을 열면 다른 기기의 변경 사항을 가져온다 (실시간 동기화 사용 기기는 제외)
 fbInit();                                                  // 실시간 동기화 (Firebase)
