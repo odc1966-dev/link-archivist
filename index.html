@@ -183,11 +183,12 @@ main{flex:1;overflow-y:auto;padding:4px 16px 90px}
 .modal h2 button{background:none;border:none;font-size:1.2rem;cursor:pointer;color:var(--text-sub)}
 .field{margin-bottom:14px}
 .field label{display:block;font-size:.8rem;font-weight:700;color:var(--text-sub);margin-bottom:6px}
-.field input,.field select{
+.field input,.field select,.field textarea{
   width:100%;padding:11px 12px;border:1.5px solid var(--border);border-radius:10px;
   font-size:.92rem;font-family:inherit;background:var(--card);color:var(--text);
 }
-.field input:focus,.field select:focus{outline:none;border-color:var(--primary)}
+.field textarea{resize:none;line-height:1.5;overflow-y:auto;display:block}
+.field input:focus,.field select:focus,.field textarea:focus{outline:none;border-color:var(--primary)}
 .folder-row{display:flex;align-items:center;gap:8px;padding:9px 0;border-bottom:1px solid var(--border)}
 .folder-row span{flex:1;font-size:.92rem;font-weight:600}
 .folder-row small{color:var(--text-sub);font-size:.75rem}
@@ -299,14 +300,15 @@ nav button.on{color:var(--primary)}
 .save-mark{font-size:.72rem;color:var(--text-sub);white-space:nowrap}
 
 /* ---------- 6. 할 일 화면 ---------- */
-.todo-add{display:flex;gap:8px;margin:4px 0 2px}
-.todo-add input{
+.todo-add{display:flex;align-items:flex-start;gap:8px;margin:4px 0 2px}
+.todo-add textarea{
   flex:1;min-width:0;padding:12px 14px;border:1.5px solid var(--border);border-radius:var(--radius);
   font-size:.95rem;font-family:inherit;background:var(--card);box-shadow:var(--shadow);color:var(--text);
+  resize:none;line-height:1.5;max-height:170px;overflow-y:auto;display:block;
 }
-.todo-add input:focus{outline:none;border-color:var(--primary)}
+.todo-add textarea:focus{outline:none;border-color:var(--primary)}
 /* ＋ 버튼이 .btn 의 width:100% 를 물려받아 입력칸을 밀어내지 않도록 고정 폭으로 */
-.todo-add button{flex:0 0 auto;width:auto;margin:0;padding:0 20px;font-size:1.25rem;font-weight:800}
+.todo-add button{flex:0 0 auto;width:auto;margin:0;padding:0 20px;min-height:48px;font-size:1.25rem;font-weight:800}
 #todo-search{
   width:100%;padding:12px 16px;border:1.5px solid var(--border);border-radius:var(--radius);
   font-size:.95rem;font-family:inherit;background:var(--card);box-shadow:var(--shadow);color:var(--text);
@@ -320,9 +322,9 @@ nav button.on{color:var(--primary)}
 }
 .todo-item input[type=checkbox]{width:23px;height:23px;flex-shrink:0;margin-top:1px;accent-color:var(--primary)}
 .todo-main{flex:1;min-width:0;cursor:pointer}
-.todo-text{font-size:.95rem;font-weight:600;line-height:1.45;word-break:break-all}
+.todo-text{font-size:.95rem;font-weight:600;line-height:1.45;word-break:break-all;white-space:pre-wrap}
 .todo-item.done .todo-text{text-decoration:line-through;color:var(--text-sub)}
-.todo-note{font-size:.8rem;color:var(--text-sub);margin-top:4px;line-height:1.45;word-break:break-all}
+.todo-note{font-size:.8rem;color:var(--text-sub);margin-top:4px;line-height:1.45;word-break:break-all;white-space:pre-wrap}
 .todo-meta{display:flex;align-items:center;gap:6px;margin-top:7px;flex-wrap:wrap}
 .due{font-size:.72rem;font-weight:700;padding:3px 9px;border-radius:20px;background:#F1F2F6;color:var(--text-sub)}
 .due.over{background:#FEE2E2;color:var(--danger)}
@@ -422,7 +424,7 @@ nav button.on{color:var(--primary)}
   <!-- ========== 6. 할 일 화면 ========== -->
   <section id="view-todo" class="view">
     <div class="todo-add">
-      <input id="todo-input" type="text" placeholder="할 일을 쓰고 Enter" onkeydown="onTodoKey(event)" autocomplete="off">
+      <textarea id="todo-input" rows="1" placeholder="할 일을 쓰고 Enter (줄 바꾸려면 Shift+Enter)" onkeydown="onTodoKey(event)" oninput="autoGrow(this,170)"></textarea>
       <button class="btn btn-primary" style="margin:0" onclick="addTodo()" title="추가">＋</button>
     </div>
     <input id="todo-search" type="search" placeholder="🔍 할 일 검색" oninput="renderTodoList()" style="margin-top:10px">
@@ -2663,7 +2665,16 @@ function renderTodoList(){
   }).join('');
 }
 
-function onTodoKey(e){ if(e.key === 'Enter'){ e.preventDefault(); addTodo(); } }
+function onTodoKey(e){
+  if(e.key === 'Enter' && !e.shiftKey){ e.preventDefault(); addTodo(); }   // Shift+Enter 는 줄바꿈
+}
+// 글 길이에 맞춰 입력칸 높이를 늘린다 (한 줄에 가려 안 보이는 것을 막는다)
+function autoGrow(el, max){
+  if(!el) return;
+  el.style.height = 'auto';
+  const border = el.offsetHeight - el.clientHeight;      // scrollHeight 에는 테두리가 빠져 있다
+  el.style.height = Math.min(el.scrollHeight + border, max || 160) + 'px';
+}
 function addTodo(){
   const el = document.getElementById('todo-input');
   const text = el.value.trim();
@@ -2671,7 +2682,7 @@ function addTodo(){
   const t = TodoCore.newTodo(todoCat === '전체' ? '' : todoCat);   // 보고 있던 카테고리로 들어간다
   t.text = text;
   todos.unshift(t);
-  el.value = '';
+  el.value = ''; el.style.height = '';
   persistAll(); updateTodoBadge(); renderTodoView();
 }
 function touchTodo(t){ t.updatedAt = Date.now(); persistAll(); updateTodoBadge(); }
@@ -2695,7 +2706,7 @@ function openTodoEdit(id){
   editTodoId = id;
   document.getElementById('item-modal-body').innerHTML =
     '<h2>✅ 할 일 <button onclick="closeModal(\'item-modal\')">✕</button></h2>' +
-    '<div class="field"><label>할 일</label><input id="td-text" type="text" value="' + esc(t.text) + '"></div>' +
+    '<div class="field"><label>할 일</label><textarea id="td-text" rows="2" oninput="autoGrow(this,260)">' + esc(t.text) + '</textarea></div>' +
     '<div class="field"><label>카테고리</label><div class="chip-row" id="td-cats"></div></div>' +
     '<div class="field"><label>마감날</label>' +
       '<div style="display:flex;gap:6px;flex-wrap:wrap">' +
@@ -2705,7 +2716,7 @@ function openTodoEdit(id){
         '<button class="mini-btn" onclick="setTodoDueQuick(7)">다음 주</button>' +
         '<button class="mini-btn" onclick="setTodoDueQuick(null)">지우기</button>' +
       '</div></div>' +
-    '<div class="field"><label>메모 한 줄</label><input id="td-note" type="text" value="' + esc(t.note) + '" placeholder="없으면 비워 두세요"></div>' +
+    '<div class="field"><label>메모</label><textarea id="td-note" rows="2" placeholder="없으면 비워 두세요" oninput="autoGrow(this,160)">' + esc(t.note) + '</textarea></div>' +
     '<div style="display:flex;align-items:center;gap:10px;margin:2px 0 14px">' +
       '<input id="td-star" type="checkbox" ' + (t.star?'checked':'') + ' style="width:20px;height:20px;flex-shrink:0">' +
       '<label for="td-star" style="margin:0;font-size:.9rem;color:var(--text)">⭐ 중요 — 목록 맨 위에 둡니다</label>' +
@@ -2717,6 +2728,8 @@ function openTodoEdit(id){
       : '<button class="menu-item red" style="border:none;text-align:center;margin-top:6px" onclick="trashTodo()">🗑️ 휴지통으로</button>');
   renderTodoEditCats();
   document.getElementById('item-modal').classList.add('on');
+  autoGrow(document.getElementById('td-text'), 260);    // 긴 글도 한눈에 보이도록
+  autoGrow(document.getElementById('td-note'), 160);
 }
 function renderTodoEditCats(){
   const t = curTodo(); if(!t) return;
@@ -3424,7 +3437,7 @@ function renderSyncStatus(){
    오래된 서비스워커가 남아 있으면 GitHub 통신이 막히는 문제가 있었다.
    그래서 버전을 확인해 다르면 한 번만 자동으로 완전 새로고침한다.
    ============================================================ */
-const SW_EXPECTED = 'linkarchive-v23';
+const SW_EXPECTED = 'linkarchive-v24';
 
 // 실행 중인 서비스워커의 버전을 물어본다
 async function swVersion(){
