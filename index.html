@@ -380,7 +380,8 @@ nav button.on{color:var(--primary)}
     <textarea id="dm-input" placeholder="DM 대화 전체를 복사해서 여기에 붙여넣기 하세요.&#10;노션 링크, 구글 드라이브, 웹사이트 주소를 자동으로 찾아냅니다."></textarea>
     <button class="btn btn-outline" onclick="pasteClipboard()">📋 클립보드에서 붙여넣기</button>
     <button class="btn btn-primary" id="btn-extract" onclick="startExtract()">🔍 링크 추출 및 분류 시작</button>
-    <p class="hint" id="input-hint">API 키를 설정하면 AI가 문맥을 읽고 제목·폴더를 자동으로 정해줍니다.<br>키가 없어도 키워드 규칙으로 기본 분류됩니다.</p>
+    <button class="btn btn-outline" id="btn-quicksave" onclick="quickSaveLinks()">📥 분류 없이 바로 저장</button>
+    <p class="hint" id="input-hint">위 버튼: API 키를 설정하면 AI가 문맥을 읽고 제목·폴더를 정해 줍니다(키가 없으면 키워드 규칙).<br>아래 버튼: 분류도 검토도 없이 링크만 <b>미분류</b>로 바로 보관함에 담습니다.</p>
   </section>
 
   <!-- ========== 2. 검토 화면 ========== -->
@@ -1733,6 +1734,47 @@ function parseJsonArray(text){
   return JSON.parse(text.slice(start, end + 1));
 }
 
+/* 분류도 검토도 거치지 않고 링크만 바로 보관함에 담는다 (폴더는 미분류)
+   나중에 보관함에서 폴더를 옮기거나 'AI로 다시 정리'를 쓰면 된다 */
+function quickSaveLinks(){
+  const box = document.getElementById('dm-input');
+  const text = box.value.trim();
+  if(!text){ toast('먼저 링크를 붙여넣어 주세요'); return; }
+
+  let links = extractLinks(text);
+  if(links.length === 0){ toast('텍스트에서 링크를 찾지 못했어요'); return; }
+
+  const known = new Set([...items.map(it=>it.url), ...pending.map(p=>p.url)]);
+  const dupCount = links.filter(l=>known.has(l.url)).length;
+  links = links.filter(l=>!known.has(l.url));
+  if(links.length === 0){ toast(`링크 ${dupCount}개 모두 이미 저장되어 있어요`); return; }
+
+  const now = new Date().toISOString();
+  const base = Date.now();
+  const saved = links.map((l, i) => {
+    const fi = fileInfo(l.url);
+    return { id: base + i, url: l.url, title: fallbackTitle(l) || domainOf(l.url),
+             folder: '', memo: '',                       // 분류하지 않는다
+             file: fi ? fi.direct : '', fileKind: fi ? fi.kind : '',
+             createdAt: now, updatedAt: now };
+  });
+  saved.slice().reverse().forEach(it => items.unshift(it));   // 붙여넣은 순서대로 보이도록
+
+  box.value = '';
+  persistAll(); updateBadge();
+
+  // 파일 링크는 저장할 때 자동 다운로드 (설정에서 끌 수 있음 — 분류 저장과 같은 규칙)
+  const files = saved.filter(it => it.file);
+  if(files.length && settings.autoDownload !== false){
+    files.forEach((it, i) => setTimeout(()=>triggerDownload(it.file), i * 800));
+  }
+  currentFilter = '전체';
+  showView('archive');
+  toast(`${saved.length}개를 미분류로 저장했어요`
+    + (files.length && settings.autoDownload !== false ? ` + 📥 파일 ${files.length}개` : '')
+    + (dupCount ? ` (중복 ${dupCount}개 제외)` : ''));
+}
+
 /* ============================================================
    추출 → 분류 실행 (메인 버튼)
    ============================================================ */
@@ -1912,19 +1954,24 @@ function saveAll(){
 /* ============================================================
    3. 보관함 렌더링 / 검색 / 필터
    ============================================================ */
+// 지워진 폴더를 가리키거나 폴더가 없는 링크는 '미분류'로 본다 (어디에도 안 보이는 일이 없도록)
+function itemFolderOf(it){ return folders.includes(it.folder) ? it.folder : ''; }
+
 function renderArchive(){
-  // 폴더 필터 칩 (전체 + 각 폴더, 개수 표시)
+  // 폴더 필터 칩 (전체 + 각 폴더 + 미분류, 개수 표시)
   const filterEl = document.getElementById('folder-filter');
   const counts = {};
-  items.forEach(it=>counts[it.folder]=(counts[it.folder]||0)+1);
-  if(!folders.includes(currentFilter) && currentFilter!=='전체') currentFilter='전체';
+  let noneCount = 0;
+  items.forEach(it=>{ const f = itemFolderOf(it); if(f) counts[f]=(counts[f]||0)+1; else noneCount++; });
+  if(!folders.includes(currentFilter) && currentFilter!=='전체' && currentFilter!=='') currentFilter='전체';
   filterEl.innerHTML =
     `<button class="chip ${currentFilter==='전체'?'on':''}" onclick="setFilter('전체')">전체 ${items.length}</button>` +
-    folders.map(f=>`<button class="chip ${currentFilter===f?'on':''}" onclick="setFilter('${esc(f)}')">${esc(f)} ${counts[f]||0}</button>`).join('');
+    folders.map(f=>`<button class="chip ${currentFilter===f?'on':''}" onclick="setFilter('${esc(f)}')">${esc(f)} ${counts[f]||0}</button>`).join('') +
+    `<button class="chip ${currentFilter===''?'on':''}" onclick="setFilter('')">미분류 ${noneCount}</button>`;
 
   // 검색 + 필터 적용
   const q = document.getElementById('search').value.trim().toLowerCase();
-  let shown = items.filter(it => currentFilter==='전체' || it.folder===currentFilter);
+  let shown = items.filter(it => currentFilter==='전체' || itemFolderOf(it)===currentFilter);
   if(q) shown = shown.filter(it =>
     (it.title||'').toLowerCase().includes(q) ||
     (it.memo||'').toLowerCase().includes(q) ||
@@ -1952,7 +1999,7 @@ function renderArchive(){
       </div>
       ${it.memo ? `<p class="card-memo">💬 ${esc(it.memo)}</p>` : ''}
       <div class="archive-meta">
-        <span class="folder-tag">${esc(it.folder)}</span>
+        <span class="folder-tag"${itemFolderOf(it) ? '' : ' style="background:#F1F2F6;color:var(--text-sub)"'}>${esc(itemFolderOf(it) || '미분류')}</span>
         ${it.fileKind ? `<span class="archive-domain">📎 ${esc(it.fileKind)}</span>` : ''}
         <span class="archive-domain">${esc(domainOf(it.url))}</span>
         <span class="archive-date">${date}</span>
@@ -1975,7 +2022,9 @@ function openItemMenu(id){
     <div class="field"><label>제목 수정</label>
       <input id="edit-title" type="text" value="${esc(it.title)}"></div>
     <div class="field"><label>폴더 이동</label>
-      <select id="edit-folder">${folders.map(f=>`<option ${f===it.folder?'selected':''}>${esc(f)}</option>`).join('')}</select></div>
+      <select id="edit-folder">
+        <option value="" ${itemFolderOf(it)===''?'selected':''}>미분류</option>
+        ${folders.map(f=>`<option ${f===it.folder?'selected':''}>${esc(f)}</option>`).join('')}</select></div>
     <button class="btn btn-primary" onclick="applyItemEdit(${id})">적용</button>
     ${it.file ? `<button class="btn btn-outline" onclick="downloadItem(${id})">📥 파일 다시 다운로드</button>` : ''}
     <button class="btn btn-outline" onclick="itemToMemo(${id})">📝 이 링크로 메모 쓰기</button>
@@ -3437,7 +3486,7 @@ function renderSyncStatus(){
    오래된 서비스워커가 남아 있으면 GitHub 통신이 막히는 문제가 있었다.
    그래서 버전을 확인해 다르면 한 번만 자동으로 완전 새로고침한다.
    ============================================================ */
-const SW_EXPECTED = 'linkarchive-v24';
+const SW_EXPECTED = 'linkarchive-v25';
 
 // 실행 중인 서비스워커의 버전을 물어본다
 async function swVersion(){
